@@ -1,0 +1,7 @@
+!/target
+!/.ide
+!/.idea
+!/.git
+!/.mvn
+!/node_modules
+!/dist
