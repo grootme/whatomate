@@ -104,6 +104,12 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/bundle-api/, ''),
       },
+      // Shadowbroker AI Bridge — OSINT Intelligence (port 8660)
+      '/sb-api': {
+        target: 'http://localhost:8660',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/sb-api/, ''),
+      },
     }
   }
 })

@@ -23,6 +23,7 @@ import {
   Radio,
   FlaskConical,
   Brain,
+  Radar,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
@@ -114,6 +115,12 @@ export const navigationItems: NavItem[] = [
     name: 'Cognitive Capital',
     path: '/cognitive',
     icon: Brain,
+    permission: 'analytics'
+  },
+  {
+    name: 'OSINT Intel',
+    path: '/osint',
+    icon: Radar,
     permission: 'analytics'
   },
   {

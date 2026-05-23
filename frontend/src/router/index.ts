@@ -236,6 +236,12 @@ const router = createRouter({
           name: 'cognitive',
           component: () => import('@/views/cognitive/CognitiveView.vue'),
           meta: { permission: 'analytics' }
+        },
+        {
+          path: 'osint',
+          name: 'shadowbroker',
+          component: () => import('@/views/shadowbroker/ShadowbrokerView.vue'),
+          meta: { permission: 'analytics' }
         }
       ]
     },
