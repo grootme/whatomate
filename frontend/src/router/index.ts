@@ -217,6 +217,25 @@ const router = createRouter({
           name: 'custom-actions',
           component: () => import('@/views/settings/CustomActionsView.vue'),
           meta: { permission: 'custom_actions' }
+        },
+        // ─── Agent Integration Routes ──────────────────────────────────
+        {
+          path: 'hermes',
+          name: 'hermes',
+          component: () => import('@/views/hermes/HermesView.vue'),
+          meta: { permission: 'chat' }
+        },
+        {
+          path: 'research',
+          name: 'research',
+          component: () => import('@/views/deerflow/ResearchView.vue'),
+          meta: { permission: 'analytics' }
+        },
+        {
+          path: 'cognitive',
+          name: 'cognitive',
+          component: () => import('@/views/cognitive/CognitiveView.vue'),
+          meta: { permission: 'analytics' }
         }
       ]
     },

@@ -18,7 +18,11 @@ import {
   Zap,
   Shield,
   LineChart,
-  Tags
+  Tags,
+  // Agent integration icons
+  Radio,
+  FlaskConical,
+  Brain,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
@@ -92,6 +96,25 @@ export const navigationItems: NavItem[] = [
     path: '/campaigns',
     icon: Megaphone,
     permission: 'campaigns'
+  },
+  // ─── Agent Integration Navigation ─────────────────────────────────
+  {
+    name: 'Hermes Agent',
+    path: '/hermes',
+    icon: Radio,
+    permission: 'chat'
+  },
+  {
+    name: 'Deep Research',
+    path: '/research',
+    icon: FlaskConical,
+    permission: 'analytics'
+  },
+  {
+    name: 'Cognitive Capital',
+    path: '/cognitive',
+    icon: Brain,
+    permission: 'analytics'
   },
   {
     name: 'nav.settings',

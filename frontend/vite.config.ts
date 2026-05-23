@@ -57,6 +57,7 @@ export default defineConfig({
     port: 3000,
     allowedHosts: [],
     proxy: {
+      // Whatomate Go Backend
       '/api': {
         target: 'http://localhost:8080',
         changeOrigin: true
@@ -64,7 +65,37 @@ export default defineConfig({
       '/ws': {
         target: 'ws://localhost:8080',
         ws: true
-      }
+      },
+      // Hermes Agent API Server (port 8642) — OpenAI-compatible
+      '/hermes-api': {
+        target: 'http://localhost:8642',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/hermes-api/, ''),
+      },
+      // Hermes WhatsApp Baileys Bridge (port 3001)
+      '/hermes-bridge': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/hermes-bridge/, ''),
+      },
+      // Hermes Dashboard API (port 9119)
+      '/hermes-dashboard': {
+        target: 'http://localhost:9119',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/hermes-dashboard/, ''),
+      },
+      // DeerFlow Gateway (port 8001)
+      '/deerflow-api': {
+        target: 'http://localhost:8001',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/deerflow-api/, ''),
+      },
+      // Cognitive Capital API (port 8642/hermes or dedicated port)
+      '/cognitive-api': {
+        target: 'http://localhost:8645',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/cognitive-api/, ''),
+      },
     }
   }
 })
