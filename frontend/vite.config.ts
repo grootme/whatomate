@@ -92,11 +92,17 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/deerflow-api/, ''),
       },
-      // Cognitive Capital API (port 8642/hermes or dedicated port)
+      // Cognitive Capital API (port 8645)
       '/cognitive-api': {
         target: 'http://localhost:8645',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/cognitive-api/, ''),
+      },
+      // Real-Time Bundle — Monitoreo/Análisis/Decisión (port 8650)
+      '/bundle-api': {
+        target: 'http://localhost:8650',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/bundle-api/, ''),
       },
     }
   }
