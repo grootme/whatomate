@@ -54,8 +54,10 @@ export default defineConfig({
     drop: ['console', 'debugger']
   },
   server: {
+    host: '0.0.0.0',
     port: 3000,
-    allowedHosts: [],
+    strictPort: false,
+    allowedHosts: 'all',
     proxy: {
       // Whatomate Go Backend
       '/api': {
