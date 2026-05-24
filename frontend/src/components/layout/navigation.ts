@@ -23,7 +23,6 @@ import {
   Radio,
   FlaskConical,
   Brain,
-  Radar,
 } from 'lucide-vue-next'
 import type { Component } from 'vue'
 
@@ -117,12 +116,8 @@ export const navigationItems: NavItem[] = [
     icon: Brain,
     permission: 'analytics'
   },
-  {
-    name: 'OSINT Intel',
-    path: '/osint',
-    icon: Radar,
-    permission: 'analytics'
-  },
+  // Shadowbroker is now a SEPARATE project: https://github.com/grootme/shadowbroker
+  // Access Shadowbroker via the integration layer in frontend/src/integrations/
   {
     name: 'nav.settings',
     path: '/settings',

@@ -36,6 +36,10 @@ frontend/dist/
 frontend/.env.local
 frontend/.env.*.local
 
+# Next.js build
+.next/
+node_modules/
+
 # Playwright
 frontend/playwright-report/
 frontend/test-results/

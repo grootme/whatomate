@@ -237,12 +237,9 @@ const router = createRouter({
           component: () => import('@/views/cognitive/CognitiveView.vue'),
           meta: { permission: 'analytics' }
         },
-        {
-          path: 'osint',
-          name: 'shadowbroker',
-          component: () => import('@/views/shadowbroker/ShadowbrokerView.vue'),
-          meta: { permission: 'analytics' }
-        }
+        // Shadowbroker is now a SEPARATE project at https://github.com/grootme/shadowbroker
+        // Whatomate integrates with Shadowbroker through DeerFlow + Hermes Agent
+        // See frontend/src/integrations/ for the integration layer
       ]
     },
     {
