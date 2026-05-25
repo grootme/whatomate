@@ -32,6 +32,7 @@
     "dompurify": "^3.3.1",
     "express": "^4.22.2",
     "grid-layout-plus": "^1.1.1",
+    "ioredis": "^5.10.1",
     "lucide-vue-next": "^0.303.0",
     "pinia": "^2.1.7",
     "qrcode.vue": "^3.9.1",

@@ -60,3 +60,58 @@ uploads/
 
 # Test results
 test-results/
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+.next/
+dist/
+build/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+venv/
+.venv/
+
+# Session data
+*.session
+*.session-journal
+
+# Database
+*.db
+*.sqlite
+
+# PM2
+.pm2/
+
+# Logs
+*.log
+logs/
+
+# Redis
+dump.rdb
+
+# Download directory
+download/
+
+# Z scripts
+.zscripts/
+
+# Agent context
+agent-ctx/
+
+# OS artifacts
+.local/
+
+# Binaries (large)
+backend/whatomate
+
+# Z scripts (contain secrets)
+.zscripts/
