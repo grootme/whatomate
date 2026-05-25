@@ -57,3 +57,38 @@ Stage Summary:
 - FTS5 full-text search working in Cognitive API
 - Known unavailable: DeerFlow (8001), Hermes Agent API (8642), Go Backend (8080), Redis (6379)
 - WhatsApp Bridge is a stub - needs Hermes Agent for full functionality
+
+---
+Task ID: 3
+Agent: Main Agent
+Task: Add Telegram integration to DeerFlow + Hermes Agent, create integration tests, push Shadowbroker to GitHub
+
+Work Log:
+- Cloned DeerFlow (bytedance/deer-flow) — has built-in Telegram channel support via python-telegram-bot
+- Created WhatsApp channel for DeerFlow at backend/app/channels/whatsapp.py (polls Whatomate Bridge)
+- Registered WhatsApp in DeerFlow channel registry and credential keys
+- Updated DeerFlow config.example.yaml with WhatsApp channel section
+- Created DeerFlow config.yaml with Telegram + WhatsApp enabled using user's bot token
+- Created Hermes Agent project at /home/z/hermes-agent/ with full Telegram + WhatsApp + OpenRouter integration
+- Hermes Agent features: Express API (8642), Telegram bot (@IntellixBot), WhatsApp channel, OpenRouter AI, session manager, cron scheduler
+- Hermes Agent Telegram bot connects via long-polling (node-telegram-bot-api)
+- Hermes Agent WhatsApp channel polls Whatomate Bridge on port 3001
+- Created integration test suite at /home/z/my-project/tests/integration-test.mjs
+- Ran comprehensive integration tests:
+  - All 5 services running: Frontend (3000), Bridge (3001), Hermes (8642), Cognitive (8645), Shadowbroker (8660)
+  - Telegram Bot @IntellixBot: CONNECTED and operational
+  - WhatsApp Bridge: CONNECTED (stub mode)
+  - Hermes AI (OpenRouter): WORKING — chat completion confirmed
+  - Shadowbroker AI: WORKING — query responses confirmed
+  - Cognitive API: WORKING — CRUD + FTS5 search confirmed
+  - Vite proxy routes: WORKING
+- Pushed Hermes Agent to GitHub: https://github.com/grootme/hermes-agent
+- Shadowbroker already on GitHub: https://github.com/grootme/shadowbroker (up to date)
+
+Stage Summary:
+- DeerFlow has Telegram + WhatsApp channel support (WhatsApp is new addition)
+- Hermes Agent created with @IntellixBot Telegram bot + WhatsApp bridge integration
+- Telegram Bot token: 7892896783:AAGfNhHc17aIFbedR4iw1txEYBGhsg9oz40 (bot: @IntellixBot)
+- All integration tests pass: AI responses, channel connectivity, cross-service communication
+- 5 services running on ports: 3000, 3001, 8642, 8645, 8660
+- GitHub repos: grootme/whatomate, grootme/shadowbroker, grootme/hermes-agent
