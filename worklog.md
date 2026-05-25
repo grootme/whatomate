@@ -1,4 +1,4 @@
-# Hermes Agent + Shadowbroker Work Log
+# Hermes Agent + Shadowbroker + Telethon Work Log
 
 ---
 Task ID: 1
@@ -27,3 +27,34 @@ Stage Summary:
 - Hermes Agent /api/channels/:channelType/send: WORKING
 - Integration tests created at /home/z/hermes-agent/tests/
 - Shadowbroker now dispatches alerts to both Telegram and WhatsApp via Hermes
+
+---
+Task ID: 2
+Agent: Main Agent
+Task: Create Telethon Python integration + Whatomate+Agents integration test
+
+Work Log:
+- Installed Telethon 1.43.2 for Python 3.12 and 3.13
+- Created /home/z/deer-flow/backend/app/channels/telegram_user.py (Telethon channel for DeerFlow)
+- Registered telegram_user in DeerFlow channel registry (service.py)
+- Added credential keys for telegram_user (api_id, api_hash)
+- Created Telethon auth API endpoints in channels.py router:
+  - GET /api/channels/telegram_user/status
+  - POST /api/channels/telegram_user/send_code
+  - POST /api/channels/telegram_user/submit_code
+  - POST /api/channels/telegram_user/send
+- Added telethon as optional dependency in pyproject.toml
+- Updated config.yaml with telegram_user channel section (disabled by default)
+- Created standalone Telethon client script: /home/z/deer-flow/backend/scripts/telethon_client.py
+- Created integration test: /home/z/deer-flow/backend/tests/integration-telethon.test.py
+- Created Whatomate+Agents integration test: /home/z/hermes-agent/tests/integration-whatomate-agents.test.ts
+- Ran Whatomate+Agents test: 17/17 PASSED
+- Ran Telethon integration test: 10/10 PASSED
+- Pushed Hermes Agent changes (commit 36bd5fd)
+
+Stage Summary:
+- Telethon integration for DeerFlow: CREATED (channel class + API endpoints + standalone client)
+- Login flow: api_id + api_hash → send_code → submit_code → (2FA password) → session saved
+- Whatomate+Agents integration: VERIFIED (all 17 tests passing)
+- Telethon module import + client connection: VERIFIED
+- DeerFlow changes are local only (upstream is bytedance/deer-flow)
