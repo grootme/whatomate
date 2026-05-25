@@ -38,7 +38,7 @@ export class TelegramBotChannel {
           // Split long messages (Telegram limit: 4096 chars)
           const chunks = this.splitMessage(result.response, 4000)
           for (const chunk of chunks) {
-            await this.bot.sendMessage(chatId, chunk, { parse_mode: 'Markdown' })
+            await this.bot.sendMessage(chatId, chunk, { parse_mode: 'HTML' })
           }
         } else if (result.error) {
           await this.bot.sendMessage(chatId, `Error: ${result.error}`)
@@ -89,7 +89,7 @@ export class TelegramBotChannel {
     try {
       const chunks = this.splitMessage(message, 4000)
       for (const chunk of chunks) {
-        await this.bot.sendMessage(chatId, chunk, { parse_mode: 'Markdown' })
+        await this.bot.sendMessage(chatId, chunk, { parse_mode: 'HTML' })
       }
     } catch (error: any) {
       console.error(`[hermes:telegram] Send error:`, error.message)
