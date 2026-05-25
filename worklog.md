@@ -95,3 +95,33 @@ Stage Summary:
 - Session string persisted for future auto-connect
 - Hermes Agent updated with Telethon command routing
 - All Python code at /home/z/my-project/telethon-service/
+---
+Task ID: 1-8
+Agent: Main Agent
+Task: Full ecosystem integration - pm2, Hermes Agent, Telethon, Redis Streams, Skills/Tools/MCP, GitHub push
+
+Work Log:
+- Installed pm2 globally as daemon manager for all Node.js and Python services
+- Installed Redis from source (user-space install at ~/.local/bin/) and started on port 6379
+- Created Hermes Agent v0.15.0 at /home/z/my-project/hermes-agent/
+  - Express API server on port 8642 with OpenAI-compatible chat completions
+  - Telegram Bot channel (node-telegram-bot-api) with command routing
+  - Command Router: analiza grupos, lista grupos, busca, reporte shadowbroker, reporte, estado, whatsapp, ayuda, chat IA
+  - Skills Registry: 8 declarative skills (telegram-group-analysis, telegram-search, shadowbroker-osint, threat-assessment, cognitive-search, deep-research, whatsapp-status, ecosystem-report)
+  - Tools Registry: 5 reactive tools (alert-dispatcher, threat-notifier, intel-processor, whatsapp-processor, pattern-detector)
+  - MCP Bridge: 17+ tools for external AI model integration (Telegram, Shadowbroker, Cognitive, DeerFlow, WhatsApp)
+  - Event Bus Bridge: Redis Streams consumer/producer for cross-service event sourcing
+- Telethon Service connected as Knight (@KnightDark2023) via StringSession - no new login needed
+- Fixed Shadowbroker AI Bridge: syntax error at line 1523, added ioredis dependency, created symlinks for .ts->.js resolution
+- Created ecosystem.config.cjs for pm2 with all 7 services
+- All services running via pm2 with auto-restart
+- Redis Streams event sourcing active across Hermes Agent and Shadowbroker
+- Removed secrets from git history using git-filter-repo
+- Pushed all changes to grootme/whatomate GitHub repo
+
+Stage Summary:
+- Ecosystem fully operational: Redis (6379), Cognitive API (8645), WhatsApp Bridge (3001), Shadowbroker (8660), Telethon (8700), Hermes Agent (8642), Frontend (3000)
+- Telethon connected as @KnightDark2023 with 81 groups accessible
+- Bot commands working: "lista mis grupos" returns 81 groups with participants and unread counts
+- pm2 ensures all services persist across sessions
+- All code pushed to https://github.com/grootme/whatomate
