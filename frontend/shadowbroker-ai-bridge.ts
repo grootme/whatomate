@@ -1111,10 +1111,15 @@ app.get('/status', async (_req, res) => {
 app.post('/analyze', async (req, res) => {
   try {
     const { type, data: overrideData, prompt: customPrompt } = req.body
-    const analysisData = overrideData || lastLiveData
+    let analysisData = overrideData || lastLiveData
+
+    // Auto-fetch data if not available
+    if (!analysisData) {
+      analysisData = await fetchShadowbrokerLiveData()
+    }
 
     if (!analysisData) {
-      return res.status(400).json({ error: 'No data available. Ensure Shadowbroker backend is running.' })
+      return res.status(400).json({ error: 'No data available. Ensure Shadowbroker OSINT backend is running on port 8000.' })
     }
 
     let result: any
@@ -1139,6 +1144,9 @@ app.post('/analyze', async (req, res) => {
         result = await correlateEvents(events)
         break
       }
+      case 'report':
+        result = await generateIntelReport(analysisData)
+        break
       case 'custom': {
         if (!customPrompt) return res.status(400).json({ error: 'custom prompt required for type=custom' })
         const aiResult = await analyzeWithAI(customPrompt, JSON.stringify(analysisData).substring(0, 6000))
@@ -1147,7 +1155,7 @@ app.post('/analyze', async (req, res) => {
         break
       }
       default:
-        return res.status(400).json({ error: `Unknown analysis type: ${type}. Use: threat, geospatial, anomaly, correlate, custom` })
+        return res.status(400).json({ error: `Unknown analysis type: ${type}. Use: threat, geospatial, anomaly, correlate, report, custom` })
     }
 
     // Sync to Cognitive API
@@ -1166,10 +1174,15 @@ app.post('/analyze', async (req, res) => {
 app.post('/report', async (req, res) => {
   try {
     const { data: overrideData } = req.body
-    const reportData = overrideData || lastLiveData
+    let reportData = overrideData || lastLiveData
+
+    // Auto-fetch data if not available
+    if (!reportData) {
+      reportData = await fetchShadowbrokerLiveData()
+    }
 
     if (!reportData) {
-      return res.status(400).json({ error: 'No data available for report generation.' })
+      return res.status(400).json({ error: 'No data available for report generation. Ensure Shadowbroker OSINT backend is running on port 8000.' })
     }
 
     const result = await generateIntelReport(reportData)

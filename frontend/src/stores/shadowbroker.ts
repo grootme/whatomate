@@ -137,7 +137,7 @@ export const useShadowbrokerStore = defineStore('shadowbroker', () => {
     try {
       const { data } = await sbClient.get<ShadowbrokerHealth>('/health')
       health.value = data
-      isConnected.value = data.shadowbroker_connected
+      isConnected.value = data.shadowbroker?.reachable ?? data.shadowbroker_connected ?? false
       isAutopilot.value = data.autopilot
       error.value = null
     } catch (e: any) {

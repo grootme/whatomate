@@ -1,27 +1,29 @@
 /**
- * Hermes Agent v0.16.0 — Intelligent AI Agent & Ecosystem Orchestrator
+ * Hermes Agent v0.17.0 — Clean AI-Driven Architecture
  *
- * The central nervous system of the Whatomate platform.
- * Uses AI (OpenRouter) with function calling to understand user intent,
- * decompose requests, and execute tools across the ecosystem.
+ * Architecture: User → Telegram/API → AgentExecutor → AI understands intent →
+ * → Decomposes into tasks → Calls tools (Unified ToolRegistry) →
+ * → Executes (parallel when possible) → Synthesizes response → User
  *
- * Architecture:
- *   User → Telegram Bot → AgentExecutor → AI understands intent →
- *   → Decomposes into tasks → Calls tools (Telethon, Shadowbroker, etc.) →
- *   → Synthesizes response → User
- *
- * No more hard-coded command patterns. The AI decides what tools to use.
+ * Key Changes from v0.16:
+ *   - Unified ToolRegistry: single source of truth for all tools
+ *   - No more CommandRouter (dead code removed)
+ *   - SkillsRegistry is now a thin wrapper over ToolRegistry
+ *   - MCP integration uses the same ToolRegistry
+ *   - Reactive tools (event-driven) separated from AI-callable tools
  */
 
 import 'dotenv/config'
 import express from 'express'
 
+import { ToolRegistry } from './tools/registry.js'
+import { registerAllTools } from './tools/definitions/index.js'
 import { TelegramBotChannel } from './channels/telegram.js'
 import { AgentExecutor } from './services/agent-executor.js'
 import { EventBusBridge } from './services/eventbus-bridge.js'
 import { SkillsRegistry } from './skills/index.js'
-import { ToolsRegistry } from './tools/index.js'
-import { executeMCPTool, mcpTools } from './mcp/index.js'
+import { ReactiveToolsRegistry } from './tools/reactive.js'
+import { createMCPBridge } from './mcp/index.js'
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 
@@ -33,12 +35,29 @@ if (!BOT_TOKEN) {
   process.exit(1)
 }
 
-// ─── Initialize Services ─────────────────────────────────────────────────────
+// ─── Initialize Core Services ────────────────────────────────────────────────
 
+// 1. Create the Unified Tool Registry
+const toolRegistry = new ToolRegistry()
+
+// 2. Register all AI-callable tools
+registerAllTools(toolRegistry)
+console.log(`[hermes] Registered ${toolRegistry.count} AI-callable tools`)
+
+// 3. Create Event Bus
 const eventBus = new EventBusBridge()
-const agentExecutor = new AgentExecutor(eventBus)
-const skillsRegistry = new SkillsRegistry()
-const toolsRegistry = new ToolsRegistry()
+
+// 4. Create Agent Executor with Tool Registry
+const agentExecutor = new AgentExecutor(toolRegistry, eventBus)
+
+// 5. Create Skills Registry (thin wrapper over ToolRegistry)
+const skillsRegistry = new SkillsRegistry(toolRegistry)
+
+// 6. Create Reactive Tools Registry (event-driven background workers)
+const reactiveTools = new ReactiveToolsRegistry()
+
+// 7. Create MCP Bridge (uses ToolRegistry)
+const mcpBridge = createMCPBridge(toolRegistry)
 
 // ─── Express API Server ──────────────────────────────────────────────────────
 
@@ -59,12 +78,15 @@ app.get('/health', async (_req, res) => {
   res.json({
     status: 'ok',
     service: 'hermes-agent',
-    version: '0.16.0',
-    architecture: 'agentic-ai',
+    version: '0.17.0',
+    architecture: 'agentic-ai-unified',
     uptime: process.uptime(),
+    tools: {
+      ai_callable: toolRegistry.count,
+      reactive: reactiveTools.list().length,
+      mcp: mcpBridge.getTools().length,
+    },
     skills: skillsRegistry.list().length,
-    tools: toolsRegistry.list().length,
-    mcp_tools: mcpTools.length,
     ecosystem,
   })
 })
@@ -145,17 +167,29 @@ app.post('/api/skills/:skillId/execute', async (req, res) => {
   }
 })
 
-// ─── Tools API ───────────────────────────────────────────────────────────────
+// ─── Tools API (Unified) ────────────────────────────────────────────────────
 
 app.get('/api/tools', (_req, res) => {
   res.json({
-    tools: toolsRegistry.list(),
-    mcp_tools: mcpTools.map(t => ({
-      name: t.name,
+    tools: toolRegistry.list(),
+    reactive: reactiveTools.list(),
+    mcp_tools: mcpBridge.getTools().map(t => ({
+      name: t.function.name,
       description: t.function.description,
       service: t.function.name.split('_')[0],
     })),
   })
+})
+
+app.post('/api/tools/:toolName/execute', async (req, res) => {
+  try {
+    const { toolName } = req.params
+    const { params } = req.body
+    const result = await toolRegistry.execute(toolName, params || {})
+    res.json(result)
+  } catch (error: any) {
+    res.status(500).json({ error: { message: error.message } })
+  }
 })
 
 // ─── Ecosystem Status ────────────────────────────────────────────────────────
@@ -177,39 +211,36 @@ app.get('/api/events', async (_req, res) => {
 app.post('/api/mcp/call', async (req, res) => {
   try {
     const { tool, arguments: args } = req.body
-    const result = await executeMCPTool(tool, args)
+    const result = await mcpBridge.execute(tool, args)
     res.json(result)
   } catch (error: any) {
     res.status(500).json({ error: { message: error.message } })
   }
 })
 
-// ─── MCP Tools List ──────────────────────────────────────────────────────────
-
 app.get('/api/mcp/tools', (_req, res) => {
   res.json({
-    tools: mcpTools,
-    count: mcpTools.length,
+    tools: mcpBridge.getTools(),
+    count: mcpBridge.getTools().length,
   })
 })
 
 // ─── Conversation History ────────────────────────────────────────────────────
 
 app.delete('/api/conversation/:chatId', (req, res) => {
-  // Clear conversation history for a chat
   res.json({ success: true, message: 'Conversation history cleared' })
 })
 
 // ─── Start Server ────────────────────────────────────────────────────────────
 
 async function main() {
-  console.log('[hermes] Starting Hermes Agent v0.16.0 (Agentic AI)...')
+  console.log('[hermes] Starting Hermes Agent v0.17.0 (Unified AI Architecture)...')
 
   // Initialize event bus
   await eventBus.connect()
 
-  // Initialize tools with event bus
-  toolsRegistry.setEventBus(eventBus)
+  // Initialize reactive tools with event bus
+  reactiveTools.setEventBus(eventBus)
 
   // Start Express
   app.listen(PORT, '0.0.0.0', () => {
@@ -219,9 +250,13 @@ async function main() {
   // Start Telegram Bot
   await telegramBot.start()
 
+  const aiTools = toolRegistry.count
+  const reactiveCount = reactiveTools.list().length
+  const mcpCount = mcpBridge.getTools().length
+
   console.log('[hermes] Hermes Agent is ready!')
-  console.log(`[hermes] Architecture: Agentic AI with function calling`)
-  console.log(`[hermes] ${skillsRegistry.list().length} skills, ${toolsRegistry.list().length} reactive tools, ${mcpTools.length} MCP tools`)
+  console.log(`[hermes] Architecture: Unified AI with ToolRegistry + parallel execution`)
+  console.log(`[hermes] ${aiTools} AI-callable tools | ${reactiveCount} reactive tools | ${mcpCount} MCP tools | ${skillsRegistry.list().length} skills`)
 
   // Graceful shutdown
   const shutdown = async () => {

@@ -60,10 +60,15 @@ export class EventBusBridge {
 
       // Build flat array for ioredis
       for (const [key, value] of Object.entries(serializedEvent)) {
-        flatFields.push(key, value)
+        flatFields.push(String(key), String(value))
       }
 
-      await this.publisher.xadd(stream, '*', ...flatFields)
+      // Guard: xadd requires at least one field
+      if (flatFields.length < 2) {
+        flatFields.push('event', JSON.stringify(event).substring(0, 8000))
+      }
+
+      await this.publisher.xadd(stream, '*', flatFields as any)
     } catch (err: any) {
       console.warn(`[hermes:eventbus] Publish failed: ${err.message}`)
     }
@@ -120,10 +125,16 @@ export class EventBusBridge {
 
           if (!results) continue
 
-          for (const [stream, messages] of results) {
-            for (const [entryId, fields] of messages) {
+          for (const [stream, messages] of results as any) {
+            for (const [entryId, fields] of messages as any) {
               try {
-                const fieldMap = Object.fromEntries(fields)
+                // fields from ioredis is a flat array [key1, val1, key2, val2, ...]
+                const fieldMap: Record<string, string> = {}
+                if (Array.isArray(fields)) {
+                  for (let i = 0; i < fields.length - 1; i += 2) {
+                    fieldMap[fields[i]] = fields[i + 1]
+                  }
+                }
                 const data = fieldMap.data ? JSON.parse(fieldMap.data) : fieldMap
                 const handler = this.handlers.get(data.type) || this.handlers.get('*')
                 if (handler) await handler(data)

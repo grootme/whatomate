@@ -69,19 +69,21 @@ module.exports = {
       watch: false,
     },
 
-    // ─── 3. WhatsApp Bridge Stub (port 3001) ────────────────────────────
+    // ─── 3. WhatsApp Bridge — Baileys (port 3001) ──────────────────────
     {
       name: 'whatsapp-bridge',
-      cwd: '/home/z/my-project/frontend',
-      script: 'whatsapp-bridge-stub.cjs',
+      cwd: '/home/z/my-project/hermes-agent/whatsapp-bridge',
+      script: 'bridge.cjs',
       interpreter: 'node',
       env: {
         PORT: '3001',
         NODE_ENV: 'production',
+        REDIS_HOST: 'localhost',
+        REDIS_PORT: '6379',
       },
       autorestart: true,
       max_restarts: 10,
-      restart_delay: 3000,
+      restart_delay: 5000,
     },
 
     // ─── 4. Shadowbroker AI Bridge (port 8660) ──────────────────────────
@@ -105,7 +107,22 @@ module.exports = {
       watch: false,
     },
 
-    // ─── 5. Telethon Service (port 8700) ────────────────────────────────
+    // ─── 5. Shadowbroker OSINT Backend (port 8000) ──────────────────────
+    {
+      name: 'shadowbroker-osint',
+      cwd: '/home/z/shadowbroker',
+      script: '/home/z/shadowbroker/venv/bin/python3 -m uvicorn main:app --host 0.0.0.0 --port 8000',
+      interpreter: 'none',
+      env: {
+        PYTHONUNBUFFERED: '1',
+      },
+      autorestart: true,
+      max_restarts: 10,
+      restart_delay: 5000,
+      watch: false,
+    },
+
+    // ─── 6. Telethon Service (port 8700) ────────────────────────────────
     {
       name: 'telethon-service',
       cwd: '/home/z/my-project/telethon-service',
