@@ -1,1 +1,1 @@
-shadowbroker/skills/index.ts
+./index.ts

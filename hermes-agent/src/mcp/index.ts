@@ -1,208 +1,265 @@
 /**
  * MCP Bridge — Model Context Protocol integration for Hermes Agent.
- * Allows external AI models to interact with the Whatomate ecosystem
- * through the MCP protocol.
  *
  * Exposes all ecosystem services as MCP tools that can be called
- * by any MCP-compatible AI assistant.
+ * by any MCP-compatible AI assistant or external application.
+ *
+ * Two categories:
+ *   1. Ecosystem tools — direct HTTP calls to services
+ *   2. Agent tools — route through the AgentExecutor for AI-driven decomposition
  */
 
 // MCP Tool definitions for the ecosystem
 export const mcpTools = [
   // ─── Telegram / Telethon Tools ──────────────────────────────────────────
   {
-    name: 'telegram_analyze_groups',
-    description: 'Analiza todos los grupos de Telegram del usuario con IA',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        deep: { type: 'boolean', description: 'Análisis profundo con IA' },
+    type: 'function' as const,
+    function: {
+      name: 'telegram_analyze_groups',
+      description: 'Analiza todos los grupos de Telegram del usuario con IA',
+      parameters: {
+        type: 'object',
+        properties: {
+          deep: { type: 'boolean', description: 'Análisis profundo con IA' },
+        },
       },
     },
+    service: 'telethon',
     endpoint: 'POST /analyze',
-    service: 'telethon',
   },
   {
-    name: 'telegram_list_groups',
-    description: 'Lista todos los grupos de Telegram',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        include_channels: { type: 'boolean', description: 'Incluir canales' },
+    type: 'function' as const,
+    function: {
+      name: 'telegram_list_groups',
+      description: 'Lista todos los grupos de Telegram con participantes',
+      parameters: {
+        type: 'object',
+        properties: {
+          include_channels: { type: 'boolean', description: 'Incluir canales' },
+        },
       },
     },
+    service: 'telethon',
     endpoint: 'GET /groups',
-    service: 'telethon',
   },
   {
-    name: 'telegram_search',
-    description: 'Busca mensajes en todos los grupos de Telegram',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: 'Término de búsqueda' },
-        limit_per_group: { type: 'number', description: 'Resultados por grupo' },
+    type: 'function' as const,
+    function: {
+      name: 'telegram_search',
+      description: 'Busca mensajes en todos los grupos de Telegram',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Término de búsqueda' },
+          limit_per_group: { type: 'number', description: 'Resultados por grupo' },
+        },
+        required: ['query'],
       },
-      required: ['query'],
     },
+    service: 'telethon',
     endpoint: 'POST /search',
-    service: 'telethon',
   },
   {
-    name: 'telegram_get_messages',
-    description: 'Obtiene mensajes de un grupo específico',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        chat_id: { type: 'number', description: 'ID del chat/grupo' },
-        limit: { type: 'number', description: 'Cantidad de mensajes' },
+    type: 'function' as const,
+    function: {
+      name: 'telegram_get_messages',
+      description: 'Obtiene mensajes de un grupo específico',
+      parameters: {
+        type: 'object',
+        properties: {
+          chat_id: { type: 'number', description: 'ID del chat/grupo' },
+          limit: { type: 'number', description: 'Cantidad de mensajes' },
+        },
+        required: ['chat_id'],
       },
-      required: ['chat_id'],
     },
+    service: 'telethon',
     endpoint: 'GET /groups/{chat_id}/messages',
-    service: 'telethon',
   },
   {
-    name: 'telegram_send_message',
-    description: 'Envía un mensaje como usuario de Telegram',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        chat_id: { type: 'number', description: 'ID del chat' },
-        message: { type: 'string', description: 'Mensaje a enviar' },
+    type: 'function' as const,
+    function: {
+      name: 'telegram_send_message',
+      description: 'Envía un mensaje como usuario de Telegram',
+      parameters: {
+        type: 'object',
+        properties: {
+          chat_id: { type: 'number', description: 'ID del chat' },
+          message: { type: 'string', description: 'Mensaje a enviar' },
+        },
+        required: ['chat_id', 'message'],
       },
-      required: ['chat_id', 'message'],
     },
-    endpoint: 'POST /send',
     service: 'telethon',
+    endpoint: 'POST /send',
   },
 
   // ─── Shadowbroker Tools ─────────────────────────────────────────────────
   {
-    name: 'shadowbroker_threat_report',
-    description: 'Obtiene la evaluación de amenazas actual de Shadowbroker',
-    inputSchema: { type: 'object', properties: {} },
-    endpoint: 'GET /api/threats/latest',
-    service: 'shadowbroker',
-  },
-  {
-    name: 'shadowbroker_intel_report',
-    description: 'Genera un reporte de inteligencia OSINT',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        type: { type: 'string', enum: ['threat', 'geospatial', 'anomaly', 'correlation', 'full'] },
+    type: 'function' as const,
+    function: {
+      name: 'shadowbroker_report',
+      description: 'Genera un reporte de inteligencia OSINT completo',
+      parameters: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', enum: ['threat', 'geospatial', 'anomaly', 'correlation', 'full'] },
+        },
       },
     },
-    endpoint: 'GET /api/ai/report',
     service: 'shadowbroker',
+    endpoint: 'POST /report',
   },
   {
-    name: 'shadowbroker_events',
-    description: 'Obtiene eventos de inteligencia recientes',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        limit: { type: 'number', description: 'Cantidad de eventos' },
-        severity: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
+    type: 'function' as const,
+    function: {
+      name: 'shadowbroker_threat',
+      description: 'Obtiene la evaluación de amenazas actual',
+      parameters: { type: 'object', properties: {} },
+    },
+    service: 'shadowbroker',
+    endpoint: 'GET /threat-level',
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'shadowbroker_events',
+      description: 'Obtiene eventos de inteligencia recientes',
+      parameters: {
+        type: 'object',
+        properties: {
+          limit: { type: 'number', description: 'Cantidad de eventos' },
+          severity: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
+        },
       },
     },
-    endpoint: 'GET /api/events',
     service: 'shadowbroker',
+    endpoint: 'GET /events',
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'shadowbroker_analyze',
+      description: 'Ejecuta análisis específico (threat/geospatial/anomaly/correlation)',
+      parameters: {
+        type: 'object',
+        properties: {
+          analysis_type: { type: 'string', enum: ['threat', 'geospatial', 'anomaly', 'correlation'] },
+        },
+        required: ['analysis_type'],
+      },
+    },
+    service: 'shadowbroker',
+    endpoint: 'POST /analyze',
+  },
+  {
+    type: 'function' as const,
+    function: {
+      name: 'shadowbroker_dashboard',
+      description: 'Dashboard completo: amenazas, alertas, eventos, estadísticas',
+      parameters: { type: 'object', properties: {} },
+    },
+    service: 'shadowbroker',
+    endpoint: 'GET /dashboard',
   },
 
   // ─── Cognitive API Tools ────────────────────────────────────────────────
   {
-    name: 'cognitive_search',
-    description: 'Busca en la base de conocimiento cognitiva',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        q: { type: 'string', description: 'Consulta de búsqueda' },
+    type: 'function' as const,
+    function: {
+      name: 'cognitive_search',
+      description: 'Busca en la base de conocimiento cognitiva',
+      parameters: {
+        type: 'object',
+        properties: {
+          q: { type: 'string', description: 'Consulta de búsqueda' },
+        },
+        required: ['q'],
       },
-      required: ['q'],
     },
+    service: 'cognitive',
     endpoint: 'GET /search',
-    service: 'cognitive',
   },
   {
-    name: 'cognitive_entities',
-    description: 'Lista entidades en la base de conocimiento',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        type: { type: 'string', description: 'Filtrar por tipo' },
-        limit: { type: 'number', description: 'Cantidad' },
+    type: 'function' as const,
+    function: {
+      name: 'cognitive_entities',
+      description: 'Lista entidades en la base de conocimiento',
+      parameters: {
+        type: 'object',
+        properties: {
+          type: { type: 'string', description: 'Filtrar por tipo' },
+          limit: { type: 'number', description: 'Cantidad' },
+        },
       },
     },
+    service: 'cognitive',
     endpoint: 'GET /entities',
-    service: 'cognitive',
   },
   {
-    name: 'cognitive_decisions',
-    description: 'Lista decisiones registradas',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        limit: { type: 'number' },
+    type: 'function' as const,
+    function: {
+      name: 'cognitive_decisions',
+      description: 'Lista decisiones registradas',
+      parameters: {
+        type: 'object',
+        properties: {
+          limit: { type: 'number' },
+        },
       },
     },
+    service: 'cognitive',
     endpoint: 'GET /decisions',
-    service: 'cognitive',
-  },
-
-  // ─── DeerFlow Tools ─────────────────────────────────────────────────────
-  {
-    name: 'deerflow_research',
-    description: 'Inicia una investigación profunda sobre un tema',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        topic: { type: 'string', description: 'Tema a investigar' },
-        depth: { type: 'string', enum: ['quick', 'standard', 'deep'] },
-      },
-      required: ['topic'],
-    },
-    endpoint: 'POST /api/research',
-    service: 'deerflow',
   },
 
   // ─── WhatsApp Bridge Tools ──────────────────────────────────────────────
   {
-    name: 'whatsapp_status',
-    description: 'Obtiene el estado de la conexión WhatsApp',
-    inputSchema: { type: 'object', properties: {} },
-    endpoint: 'GET /health',
+    type: 'function' as const,
+    function: {
+      name: 'whatsapp_status',
+      description: 'Obtiene el estado de la conexión WhatsApp',
+      parameters: { type: 'object', properties: {} },
+    },
     service: 'whatsapp_bridge',
+    endpoint: 'GET /health',
   },
   {
-    name: 'whatsapp_qr',
-    description: 'Obtiene el código QR para vincular WhatsApp',
-    inputSchema: { type: 'object', properties: {} },
-    endpoint: 'GET /qr',
+    type: 'function' as const,
+    function: {
+      name: 'whatsapp_qr',
+      description: 'Obtiene el código QR para vincular WhatsApp',
+      parameters: { type: 'object', properties: {} },
+    },
     service: 'whatsapp_bridge',
+    endpoint: 'GET /qr',
   },
 
-  // ─── System Tools ───────────────────────────────────────────────────────
+  // ─── Agent-Level Tools ──────────────────────────────────────────────────
   {
-    name: 'ecosystem_status',
-    description: 'Obtiene el estado de todos los servicios del ecosistema',
-    inputSchema: { type: 'object', properties: {} },
-    endpoint: 'GET /health',
+    type: 'function' as const,
+    function: {
+      name: 'agent_execute',
+      description: 'Envía un prompt al agente Hermes para procesamiento inteligente. El agente descompone la solicitud y usa las herramientas necesarias.',
+      parameters: {
+        type: 'object',
+        properties: {
+          message: { type: 'string', description: 'Mensaje/prompt para el agente' },
+        },
+        required: ['message'],
+      },
+    },
     service: 'hermes',
+    endpoint: 'POST /api/agent/execute',
   },
   {
-    name: 'hermes_chat',
-    description: 'Chat con la IA de Hermes',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        message: { type: 'string', description: 'Mensaje para Hermes' },
-      },
-      required: ['message'],
+    type: 'function' as const,
+    function: {
+      name: 'ecosystem_status',
+      description: 'Obtiene el estado de todos los servicios del ecosistema',
+      parameters: { type: 'object', properties: {} },
     },
-    endpoint: 'POST /api/command',
     service: 'hermes',
+    endpoint: 'GET /health',
   },
 ]
 
@@ -220,22 +277,24 @@ const serviceUrls: Record<string, string> = {
  * Execute an MCP tool by name
  */
 export async function executeMCPTool(toolName: string, args: Record<string, any> = {}): Promise<any> {
-  const tool = mcpTools.find(t => t.name === toolName)
+  const tool = mcpTools.find(t => t.function.name === toolName)
   if (!tool) throw new Error(`MCP tool not found: ${toolName}`)
 
   const baseUrl = serviceUrls[tool.service]
   if (!baseUrl) throw new Error(`Unknown service: ${tool.service}`)
 
   // Build URL with path params
-  let endpoint = tool.endpoint
+  let endpoint = (tool as any).endpoint || ''
   for (const [key, value] of Object.entries(args)) {
     endpoint = endpoint.replace(`{${key}}`, String(value))
   }
 
-  const url = `${baseUrl}${endpoint}`
+  // Determine method from endpoint prefix
+  const method = endpoint.startsWith('POST') ? 'POST' : 'GET'
+  // Clean the endpoint to just the path
+  const path = endpoint.replace(/^(GET|POST)\s+/, '')
 
-  // Determine method
-  const method = tool.endpoint.startsWith('POST') ? 'POST' : 'GET'
+  const url = `${baseUrl}${path}`
 
   try {
     const options: RequestInit = {

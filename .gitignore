@@ -115,3 +115,6 @@ backend/whatomate
 
 # Z scripts (contain secrets)
 .zscripts/
+
+# Telethon config (has API credentials)
+telethon-service/config.py

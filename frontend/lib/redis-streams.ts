@@ -380,17 +380,34 @@ export class EventBus {
         const pending = await this.publisher.xpending(stream, this.groupName)
         if (!pending || pending.pending === 0) continue
 
-        // Get pending entries
-        const pendingEntries = await this.publisher.xpending_range(
-          stream, this.groupName, '-', '+', 100,
-        )
+        // Get pending entries using XPENDING with RANGE
+        // ioredis v5+ uses camelCase: xpendingRange
+        let pendingEntries: any[] = []
+        try {
+          pendingEntries = await (this.publisher as any).xpendingRange(
+            stream, this.groupName, '-', '+', 100,
+          )
+        } catch {
+          // Fallback: try snake_case for older ioredis
+          try {
+            pendingEntries = await (this.publisher as any).xpending_range(
+              stream, this.groupName, '-', '+', 100,
+            )
+          } catch {
+            // If neither works, skip stale claiming for this stream
+            continue
+          }
+        }
 
         if (!pendingEntries || pendingEntries.length === 0) continue
 
         const staleIds: string[] = []
         for (const entry of pendingEntries) {
-          if (entry.idleTime > IDLE_THRESHOLD_MS) {
-            staleIds.push(entry.id as string)
+          // Handle both object and array formats from different ioredis versions
+          const idleTime = entry.idleTime ?? entry.idle_time ?? (Array.isArray(entry) ? entry[2] : 0)
+          const id = entry.id ?? (Array.isArray(entry) ? entry[0] : null)
+          if (idleTime > IDLE_THRESHOLD_MS && id) {
+            staleIds.push(String(id))
           }
         }
 

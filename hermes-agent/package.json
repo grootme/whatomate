@@ -1,7 +1,7 @@
 {
   "name": "hermes-agent",
-  "version": "0.15.0",
-  "description": "Hermes Agent - Telegram Bot & Ecosystem Orchestrator for Whatomate Platform",
+  "version": "0.16.0",
+  "description": "Hermes Agent - Intelligent AI Agent & Ecosystem Orchestrator for Whatomate Platform",
   "main": "src/index.ts",
   "scripts": {
     "start": "tsx src/index.ts",

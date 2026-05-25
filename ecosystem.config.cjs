@@ -7,6 +7,8 @@
  * Status:             pm2 status
  * Logs:               pm2 logs
  *
+ * Secrets are loaded from .env.secrets (gitignored)
+ *
  * Service Ports:
  *   3000  — Vue.js Frontend (Vite)
  *   3001  — WhatsApp Bridge (stub)
@@ -16,6 +18,26 @@
  *   8700  — Telethon Service (Python)
  *   6379  — Redis Server
  */
+
+// Load secrets from .env.secrets
+const fs = require('fs')
+const path = require('path')
+let secrets = {}
+try {
+  const secretsPath = path.join(__dirname, '.env.secrets')
+  const secretsContent = fs.readFileSync(secretsPath, 'utf8')
+  for (const line of secretsContent.split('\n')) {
+    const trimmed = line.trim()
+    if (trimmed && !trimmed.startsWith('#')) {
+      const [key, ...valueParts] = trimmed.split('=')
+      if (key && valueParts.length > 0) {
+        secrets[key.trim()] = valueParts.join('=').trim()
+      }
+    }
+  }
+} catch {
+  console.warn('[ecosystem] .env.secrets not found, using environment variables')
+}
 
 module.exports = {
   apps: [
@@ -71,7 +93,9 @@ module.exports = {
       interpreter_args: 'tsx',
       env: {
         BRIDGE_PORT: '8660',
-        OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY || '',
+        OPENROUTER_API_KEY: secrets.OPENROUTER_API_KEY || process.env.OPENROUTER_API_KEY || '',
+        OPENROUTER_MODEL: secrets.OPENROUTER_MODEL || process.env.OPENROUTER_MODEL || 'deepseek/deepseek-chat-v3-0324',
+        COGNITIVE_URL: 'http://localhost:8645',
         REDIS_URL: 'redis://localhost:6379',
         NODE_ENV: 'production',
       },
@@ -105,14 +129,15 @@ module.exports = {
       interpreter_args: 'tsx',
       env: {
         HERMES_PORT: '8642',
-        TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || '',
-        TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID || '',
+        TELEGRAM_BOT_TOKEN: secrets.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN || '',
+        TELEGRAM_CHAT_ID: secrets.TELEGRAM_CHAT_ID || process.env.TELEGRAM_CHAT_ID || '',
         TELETHON_URL: 'http://localhost:8700',
         SHADOWBROKER_URL: 'http://localhost:8660',
         COGNITIVE_URL: 'http://localhost:8645',
         DEERFLOW_URL: 'http://localhost:8000',
         WHATSAPP_BRIDGE_URL: 'http://localhost:3001',
-        OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY || '',
+        OPENROUTER_API_KEY: secrets.OPENROUTER_API_KEY || process.env.OPENROUTER_API_KEY || '',
+        OPENROUTER_MODEL: secrets.OPENROUTER_MODEL || process.env.OPENROUTER_MODEL || 'deepseek/deepseek-chat-v3-0324',
         REDIS_URL: 'redis://localhost:6379',
         NODE_ENV: 'production',
       },

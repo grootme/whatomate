@@ -1,1 +1,1 @@
-shadowbroker/tools/index.ts
+./index.ts

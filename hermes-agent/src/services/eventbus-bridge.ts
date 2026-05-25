@@ -38,15 +38,32 @@ export class EventBusBridge {
     if (!this.connected || !this.publisher) return
 
     try {
-      const fields: Record<string, string> = {
-        id: event.id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        type: event.type || 'unknown',
-        source: event.source || 'hermes-agent',
-        timestamp: String(event.timestamp || Date.now()),
-        data: JSON.stringify(event),
+      // Flatten event into key-value pairs for Redis XADD
+      // ioredis xadd requires: xadd(stream, id, key1, val1, key2, val2, ...)
+      const flatFields: (string | Buffer)[] = []
+      const serializedEvent: Record<string, string> = {}
+
+      for (const [key, value] of Object.entries(event)) {
+        if (value !== undefined && value !== null) {
+          const strValue = typeof value === 'string' ? value : JSON.stringify(value)
+          // Truncate very long values to avoid Redis buffer issues
+          serializedEvent[key] = strValue.substring(0, 8000)
+        }
       }
 
-      await this.publisher.xadd(stream, '*', fields)
+      // Always include core fields
+      if (!serializedEvent.id) serializedEvent.id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      if (!serializedEvent.type) serializedEvent.type = 'unknown'
+      if (!serializedEvent.source) serializedEvent.source = 'hermes-agent'
+      if (!serializedEvent.timestamp) serializedEvent.timestamp = String(Date.now())
+      if (!serializedEvent.data) serializedEvent.data = JSON.stringify(event).substring(0, 8000)
+
+      // Build flat array for ioredis
+      for (const [key, value] of Object.entries(serializedEvent)) {
+        flatFields.push(key, value)
+      }
+
+      await this.publisher.xadd(stream, '*', ...flatFields)
     } catch (err: any) {
       console.warn(`[hermes:eventbus] Publish failed: ${err.message}`)
     }

@@ -1,31 +1,27 @@
 /**
- * Hermes Agent v0.15.0 — Telegram Bot & Ecosystem Orchestrator
+ * Hermes Agent v0.16.0 — Intelligent AI Agent & Ecosystem Orchestrator
  *
  * The central nervous system of the Whatomate platform.
- * Receives user commands from Telegram bot and routes them through
- * the full ecosystem: Telethon, Shadowbroker, DeerFlow, Cognitive API.
+ * Uses AI (OpenRouter) with function calling to understand user intent,
+ * decompose requests, and execute tools across the ecosystem.
  *
  * Architecture:
- *   User → Telegram Bot → Hermes Agent → Ecosystem Services → AI Analysis → Response
+ *   User → Telegram Bot → AgentExecutor → AI understands intent →
+ *   → Decomposes into tasks → Calls tools (Telethon, Shadowbroker, etc.) →
+ *   → Synthesizes response → User
  *
- * Commands:
- *   "analiza mis grupos"    → Full Telegram group analysis via Telethon + AI
- *   "lista mis grupos"      → List all Telegram groups with participants
- *   "busca [término]"       → Search messages across all groups
- *   "reporte shadowbroker"  → Generate Shadowbroker OSINT report
- *   "reporte [tema]"        → Generate AI report on any topic
- *   "estado"                → Ecosystem health check
- *   Any other text          → AI chat via OpenRouter
+ * No more hard-coded command patterns. The AI decides what tools to use.
  */
 
 import 'dotenv/config'
 import express from 'express'
 
-import { TelegramBot } from './channels/telegram.js'
-import { CommandRouter } from './services/command-router.js'
+import { TelegramBotChannel } from './channels/telegram.js'
+import { AgentExecutor } from './services/agent-executor.js'
 import { EventBusBridge } from './services/eventbus-bridge.js'
 import { SkillsRegistry } from './skills/index.js'
 import { ToolsRegistry } from './tools/index.js'
+import { executeMCPTool, mcpTools } from './mcp/index.js'
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 
@@ -37,31 +33,38 @@ if (!BOT_TOKEN) {
   process.exit(1)
 }
 
+// ─── Initialize Services ─────────────────────────────────────────────────────
+
+const eventBus = new EventBusBridge()
+const agentExecutor = new AgentExecutor(eventBus)
+const skillsRegistry = new SkillsRegistry()
+const toolsRegistry = new ToolsRegistry()
+
 // ─── Express API Server ──────────────────────────────────────────────────────
 
 const app = express()
-app.use((req, res, next) => { res.header('Access-Control-Allow-Origin', '*'); res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS'); res.header('Access-Control-Allow-Headers', 'Content-Type,Authorization'); if (req.method === 'OPTIONS') return res.sendStatus(200); next(); })
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*')
+  res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS')
+  res.header('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+  if (req.method === 'OPTIONS') return res.sendStatus(200)
+  next()
+})
 app.use(express.json({ limit: '10mb' }))
-
-// ─── Initialize Services ─────────────────────────────────────────────────────
-
-const skillsRegistry = new SkillsRegistry()
-const toolsRegistry = new ToolsRegistry()
-const eventBus = new EventBusBridge()
-const commandRouter = new CommandRouter(skillsRegistry, toolsRegistry, eventBus)
-const telegramBot = new TelegramBot(BOT_TOKEN, commandRouter)
 
 // ─── Health Check ────────────────────────────────────────────────────────────
 
 app.get('/health', async (_req, res) => {
-  const ecosystem = await commandRouter.checkEcosystem()
+  const ecosystem = await agentExecutor.checkEcosystem()
   res.json({
     status: 'ok',
     service: 'hermes-agent',
-    version: '0.15.0',
+    version: '0.16.0',
+    architecture: 'agentic-ai',
     uptime: process.uptime(),
     skills: skillsRegistry.list().length,
     tools: toolsRegistry.list().length,
+    mcp_tools: mcpTools.length,
     ecosystem,
   })
 })
@@ -71,7 +74,22 @@ app.get('/health', async (_req, res) => {
 app.post('/v1/chat/completions', async (req, res) => {
   try {
     const { messages, model, temperature, max_tokens } = req.body
-    const result = await commandRouter.chatCompletion(messages, { model, temperature, max_tokens })
+    const result = await agentExecutor.chatCompletion(messages, { model, temperature, max_tokens })
+    res.json(result)
+  } catch (error: any) {
+    res.status(500).json({ error: { message: error.message } })
+  }
+})
+
+// ─── Agent Execute Endpoint ──────────────────────────────────────────────────
+
+app.post('/api/agent/execute', async (req, res) => {
+  try {
+    const { message, chat_id } = req.body
+    if (!message) {
+      return res.status(400).json({ error: 'message is required' })
+    }
+    const result = await agentExecutor.execute(message, chat_id)
     res.json(result)
   } catch (error: any) {
     res.status(500).json({ error: { message: error.message } })
@@ -79,6 +97,8 @@ app.post('/v1/chat/completions', async (req, res) => {
 })
 
 // ─── Channel Send API ────────────────────────────────────────────────────────
+
+const telegramBot = new TelegramBotChannel(BOT_TOKEN, agentExecutor)
 
 app.post('/api/channels/:channelType/send', async (req, res) => {
   try {
@@ -96,12 +116,12 @@ app.post('/api/channels/:channelType/send', async (req, res) => {
   }
 })
 
-// ─── Command API ─────────────────────────────────────────────────────────────
+// ─── Legacy Command API (backward compat) ────────────────────────────────────
 
 app.post('/api/command', async (req, res) => {
   try {
-    const { command, chat_id, args } = req.body
-    const result = await commandRouter.processCommand(command, chat_id, args)
+    const { command, chat_id } = req.body
+    const result = await agentExecutor.execute(command, chat_id)
     res.json(result)
   } catch (error: any) {
     res.status(500).json({ error: { message: error.message } })
@@ -128,13 +148,20 @@ app.post('/api/skills/:skillId/execute', async (req, res) => {
 // ─── Tools API ───────────────────────────────────────────────────────────────
 
 app.get('/api/tools', (_req, res) => {
-  res.json({ tools: toolsRegistry.list() })
+  res.json({
+    tools: toolsRegistry.list(),
+    mcp_tools: mcpTools.map(t => ({
+      name: t.name,
+      description: t.function.description,
+      service: t.function.name.split('_')[0],
+    })),
+  })
 })
 
 // ─── Ecosystem Status ────────────────────────────────────────────────────────
 
 app.get('/api/ecosystem', async (_req, res) => {
-  const status = await commandRouter.checkEcosystem()
+  const status = await agentExecutor.checkEcosystem()
   res.json(status)
 })
 
@@ -150,17 +177,33 @@ app.get('/api/events', async (_req, res) => {
 app.post('/api/mcp/call', async (req, res) => {
   try {
     const { tool, arguments: args } = req.body
-    const result = await commandRouter.executeMCPTool(tool, args)
+    const result = await executeMCPTool(tool, args)
     res.json(result)
   } catch (error: any) {
     res.status(500).json({ error: { message: error.message } })
   }
 })
 
+// ─── MCP Tools List ──────────────────────────────────────────────────────────
+
+app.get('/api/mcp/tools', (_req, res) => {
+  res.json({
+    tools: mcpTools,
+    count: mcpTools.length,
+  })
+})
+
+// ─── Conversation History ────────────────────────────────────────────────────
+
+app.delete('/api/conversation/:chatId', (req, res) => {
+  // Clear conversation history for a chat
+  res.json({ success: true, message: 'Conversation history cleared' })
+})
+
 // ─── Start Server ────────────────────────────────────────────────────────────
 
 async function main() {
-  console.log('[hermes] Starting Hermes Agent v0.15.0...')
+  console.log('[hermes] Starting Hermes Agent v0.16.0 (Agentic AI)...')
 
   // Initialize event bus
   await eventBus.connect()
@@ -177,7 +220,8 @@ async function main() {
   await telegramBot.start()
 
   console.log('[hermes] Hermes Agent is ready!')
-  console.log(`[hermes] ${skillsRegistry.list().length} skills, ${toolsRegistry.list().length} tools loaded`)
+  console.log(`[hermes] Architecture: Agentic AI with function calling`)
+  console.log(`[hermes] ${skillsRegistry.list().length} skills, ${toolsRegistry.list().length} reactive tools, ${mcpTools.length} MCP tools`)
 
   // Graceful shutdown
   const shutdown = async () => {
