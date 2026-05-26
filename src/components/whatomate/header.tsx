@@ -40,6 +40,10 @@ const viewTitles: Record<string, string> = {
   cognitive: 'Cognitive Capital',
   research: 'DeerFlow Research',
   hermes: 'Hermes Gateway',
+  multiagent: 'Multi-Agente OSINT',
+  strategies: 'Estrategias de Decisión',
+  monitoring: 'Monitoreo en Tiempo Real',
+  reports: 'Centro de Reportes',
   settings: 'Settings',
 };
 
@@ -66,7 +70,7 @@ export function Header({ activeView, onMenuToggle, onLogout }: HeaderProps) {
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
-            placeholder="Search conversations, contacts..."
+            placeholder="Buscar alertas, agentes, reportes..."
             className="pl-9 h-9 bg-muted/50 border-0 focus-visible:bg-background focus-visible:border"
           />
         </div>
@@ -86,25 +90,25 @@ export function Header({ activeView, onMenuToggle, onLogout }: HeaderProps) {
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-80">
             <DropdownMenuLabel className="flex items-center justify-between">
-              <span>Notifications</span>
-              <Badge variant="secondary" className="text-xs">5 new</Badge>
+              <span>Notificaciones</span>
+              <Badge variant="secondary" className="text-xs">5 nuevas</Badge>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem className="flex flex-col items-start gap-1 p-3">
-              <span className="font-medium text-sm">New message from Sarah Johnson</span>
-              <span className="text-xs text-muted-foreground">2 minutes ago</span>
+              <span className="font-medium text-sm">Pico de fraude financiero detectado</span>
+              <span className="text-xs text-muted-foreground">Hace 2 minutos</span>
             </DropdownMenuItem>
             <DropdownMenuItem className="flex flex-col items-start gap-1 p-3">
-              <span className="font-medium text-sm">Campaign "Spring Sale" completed</span>
-              <span className="text-xs text-muted-foreground">1 hour ago</span>
+              <span className="font-medium text-sm">Agente Cross-Platform en estado warning</span>
+              <span className="text-xs text-muted-foreground">Hace 15 minutos</span>
             </DropdownMenuItem>
             <DropdownMenuItem className="flex flex-col items-start gap-1 p-3">
-              <span className="font-medium text-sm">Template "promo_offer" approved</span>
-              <span className="text-xs text-muted-foreground">3 hours ago</span>
+              <span className="font-medium text-sm">Reporte diario generado exitosamente</span>
+              <span className="text-xs text-muted-foreground">Hace 1 hora</span>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem className="text-center justify-center text-[#25D366] font-medium">
-              View all notifications
+              Ver todas las notificaciones
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -137,16 +141,16 @@ export function Header({ activeView, onMenuToggle, onLogout }: HeaderProps) {
             <DropdownMenuSeparator />
             <DropdownMenuItem>
               <User className="w-4 h-4 mr-2" />
-              Profile
+              Perfil
             </DropdownMenuItem>
             <DropdownMenuItem>
               <HelpCircle className="w-4 h-4 mr-2" />
-              Help & Support
+              Ayuda y Soporte
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={onLogout} className="text-destructive">
               <LogOut className="w-4 h-4 mr-2" />
-              Sign out
+              Cerrar sesión
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

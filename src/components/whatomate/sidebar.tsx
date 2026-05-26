@@ -15,10 +15,14 @@ import {
   Brain,
   Microscope,
   Zap,
+  Radar,
+  GitBranch,
+  Activity,
+  FileOutput,
   X,
 } from 'lucide-react';
 
-const iconMap = {
+const iconMap: Record<string, React.ElementType> = {
   LayoutDashboard,
   MessageSquare,
   Users,
@@ -30,6 +34,10 @@ const iconMap = {
   Brain,
   Microscope,
   Zap,
+  Radar,
+  GitBranch,
+  Activity,
+  FileOutput,
 };
 
 interface SidebarProps {
@@ -40,6 +48,11 @@ interface SidebarProps {
 }
 
 export function Sidebar({ activeView, onViewChange, isOpen, onClose }: SidebarProps) {
+  // Group nav items: main, OSINT, settings
+  const mainItems = navItems.filter((i) => !['multiagent', 'strategies', 'monitoring', 'reports', 'settings'].includes(i.id));
+  const osintItems = navItems.filter((i) => ['multiagent', 'strategies', 'monitoring', 'reports'].includes(i.id));
+  const settingsItems = navItems.filter((i) => i.id === 'settings');
+
   return (
     <>
       {/* Mobile overlay */}
@@ -64,7 +77,7 @@ export function Sidebar({ activeView, onViewChange, isOpen, onClose }: SidebarPr
           </div>
           <div>
             <h1 className="font-bold text-lg leading-none">Whatomate</h1>
-            <p className="text-xs text-white/60 mt-0.5">Business Platform</p>
+            <p className="text-xs text-white/60 mt-0.5">OSINT Platform</p>
           </div>
           <button
             onClick={onClose}
@@ -76,8 +89,9 @@ export function Sidebar({ activeView, onViewChange, isOpen, onClose }: SidebarPr
 
         {/* Navigation */}
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto custom-scrollbar">
-          {navItems.map((item) => {
-            const Icon = iconMap[item.icon];
+          {/* Main Nav */}
+          {mainItems.map((item) => {
+            const Icon = iconMap[item.icon] || LayoutDashboard;
             const isActive = activeView === item.id;
 
             return (
@@ -101,6 +115,75 @@ export function Sidebar({ activeView, onViewChange, isOpen, onClose }: SidebarPr
                     3
                   </span>
                 )}
+              </button>
+            );
+          })}
+
+          {/* OSINT Section */}
+          <div className="pt-4 pb-2">
+            <div className="px-3 mb-2">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-white/40">
+                Inteligencia OSINT
+              </span>
+            </div>
+          </div>
+
+          {osintItems.map((item) => {
+            const Icon = iconMap[item.icon] || LayoutDashboard;
+            const isActive = activeView === item.id;
+
+            return (
+              <button
+                key={item.id}
+                onClick={() => {
+                  onViewChange(item.id);
+                  onClose();
+                }}
+                className={cn(
+                  'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150',
+                  isActive
+                    ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/30'
+                    : 'text-white/70 hover:bg-white/10 hover:text-white'
+                )}
+              >
+                <Icon className="w-5 h-5 shrink-0" />
+                <span>{item.label}</span>
+                {item.id === 'monitoring' && (
+                  <span className="ml-auto w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+                )}
+              </button>
+            );
+          })}
+
+          {/* Settings */}
+          <div className="pt-4 pb-2">
+            <div className="px-3 mb-2">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-white/40">
+                Sistema
+              </span>
+            </div>
+          </div>
+
+          {settingsItems.map((item) => {
+            const Icon = iconMap[item.icon] || LayoutDashboard;
+            const isActive = activeView === item.id;
+
+            return (
+              <button
+                key={item.id}
+                onClick={() => {
+                  onViewChange(item.id);
+                  onClose();
+                }}
+                className={cn(
+                  'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150',
+                  isActive
+                    ? 'bg-[#25D366] text-white shadow-lg shadow-[#25D366]/30'
+                    : 'text-white/70 hover:bg-white/10 hover:text-white'
+                )}
+              >
+                <Icon className="w-5 h-5 shrink-0" />
+                <span>{item.label}</span>
               </button>
             );
           })}
