@@ -57,8 +57,7 @@ module.exports = {
       name: 'cognitive-api',
       cwd: '/home/z/my-project/frontend',
       script: 'cognitive-api-server.ts',
-      interpreter: 'npx',
-      interpreter_args: 'tsx',
+      interpreter: '/home/z/my-project/frontend/node_modules/.bin/tsx',
       env: {
         COGNITIVE_API_PORT: '8645',
         NODE_ENV: 'production',
@@ -91,8 +90,7 @@ module.exports = {
       name: 'shadowbroker',
       cwd: '/home/z/my-project/frontend',
       script: 'shadowbroker-ai-bridge.ts',
-      interpreter: 'npx',
-      interpreter_args: 'tsx',
+      interpreter: '/home/z/my-project/frontend/node_modules/.bin/tsx',
       env: {
         BRIDGE_PORT: '8660',
         OPENROUTER_API_KEY: secrets.OPENROUTER_API_KEY || process.env.OPENROUTER_API_KEY || '',
@@ -142,8 +140,7 @@ module.exports = {
       name: 'hermes-agent',
       cwd: '/home/z/my-project/hermes-agent',
       script: 'src/index.ts',
-      interpreter: 'npx',
-      interpreter_args: 'tsx',
+      interpreter: '/home/z/my-project/frontend/node_modules/.bin/tsx',
       env: {
         HERMES_PORT: '8642',
         TELEGRAM_BOT_TOKEN: secrets.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN || '',
