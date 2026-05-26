@@ -1,8 +1,0 @@
-{
-  "name": "shadowbroker-osint",
-  "version": "0.1.0",
-  "description": "Shadowbroker OSINT Backend - Python FastAPI service on port 8000",
-  "scripts": {
-    "dev": "bash /home/z/shadowbroker/start.sh"
-  }
-}
