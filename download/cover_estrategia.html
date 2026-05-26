@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=794, height=1123">
+<style>
+  @page { size: 794px 1123px; margin: 0; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 794px; height: 1123px; background: #f4f5f5; }
+  @media screen {
+    html { height: auto; display: flex; justify-content: center; }
+    body { transform-origin: top center; scale: min(1, calc(100vh / 1123)); margin: 0 auto; }
+  }
+
+  .cover {
+    position: relative;
+    width: 794px;
+    height: 1123px;
+    background: #f4f5f5;
+
+  }
+
+  /* Layer 0: Background fill */
+
+  /* Layer 1: Decorative elements (clipped) */
+  .deco-line-v {
+    position: absolute;
+    top: 0;
+    left: 72px;
+    width: 2px;
+    height: 1123px;
+    background: #3b5360;
+    opacity: 0.12;
+  }
+  .deco-line-h {
+    position: absolute;
+    top: 320px;
+    left: 0;
+    width: 794px;
+    height: 1px;
+    background: #3b5360;
+    opacity: 0.10;
+  }
+  .deco-block {
+    position: absolute;
+    top: 80px;
+    right: 60px;
+    width: 260px;
+    height: 160px;
+    border: 1.5px solid #3b5360;
+    opacity: 0.08;
+    border-radius: 2px;
+  }
+  .deco-accent-bar {
+    position: absolute;
+    bottom: 180px;
+    left: 100px;
+    width: 80px;
+    height: 3px;
+    background: #b8263e;
+    opacity: 0.6;
+  }
+
+  /* Layer 2: Structure lines */
+
+  /* Layer 3: Text */
+  .kicker {
+    position: absolute;
+    top: 100px;
+    left: 100px;
+    font-family: 'Carlito', 'Calibri', sans-serif;
+    font-size: 13px;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    color: #80878a;
+    opacity: 0.7;
+  }
+
+  .hero {
+    position: absolute;
+    top: 160px;
+    left: 100px;
+    right: 80px;
+    font-family: 'Carlito', 'Calibri', sans-serif;
+    font-size: 42px;
+    font-weight: 700;
+    line-height: 1.15;
+    color: #191b1c;
+  }
+
+  .subtitle {
+    position: absolute;
+    top: 340px;
+    left: 100px;
+    right: 80px;
+    font-family: 'Carlito', 'Calibri', sans-serif;
+    font-size: 18px;
+    line-height: 1.5;
+    color: #80878a;
+  }
+
+  .summary-block {
+    position: absolute;
+    top: 480px;
+    left: 100px;
+    right: 80px;
+    background: #edeff0;
+    border-left: 3px solid #b8263e;
+    padding: 20px 24px;
+    font-family: 'Carlito', 'Calibri', sans-serif;
+    font-size: 13px;
+    line-height: 1.7;
+    color: #191b1c;
+  }
+
+  .meta-row {
+    position: absolute;
+    bottom: 140px;
+    left: 100px;
+    right: 80px;
+    display: flex;
+    justify-content: space-between;
+    font-family: 'Carlito', 'Calibri', sans-serif;
+    font-size: 12px;
+    color: #80878a;
+  }
+
+  .meta-item span {
+    display: block;
+    font-size: 11px;
+    margin-top: 3px;
+    color: #191b1c;
+    font-weight: 600;
+  }
+
+  .footer {
+    position: absolute;
+    bottom: 50px;
+    left: 100px;
+    right: 80px;
+    font-family: 'Carlito', 'Calibri', sans-serif;
+    font-size: 10px;
+    color: #80878a;
+    opacity: 0.6;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+</style>
+</head>
+<body>
+<div class="cover">
+  <!-- Layer 1: Decorative -->
+  <div class="deco-line-v"></div>
+  <div class="deco-line-h"></div>
+  <div class="deco-block"></div>
+  <div class="deco-accent-bar"></div>
+
+  <!-- Layer 3: Text -->
+  <div class="kicker">Whatomate OSINT Ecosystem</div>
+  <div class="hero">Estrategia Multi-Agente<br>para Inteligencia Digital</div>
+  <div class="subtitle">Ingesta, Analisis, Monitoreo y Generacion de Reportes:<br>Estrategias Multiples para la Toma de Decisiones</div>
+
+  <div class="summary-block">
+    Documento estrategico que define la arquitectura multi-agente del ecosistema Whatomate,
+    incluyendo los agentes de ingesta de datos (WhatsApp, Telegram, OSINT), los motores de
+    analisis semantico y cuantitativo, el sistema de monitoreo continuo, y las multiples
+    estrategias de toma de decisiones basadas en inteligencia artificial.
+  </div>
+
+  <div class="meta-row">
+    <div class="meta-item">Fecha<span>27 Mayo 2026</span></div>
+    <div class="meta-item">Version<span>v0.17.0</span></div>
+    <div class="meta-item">Clasificacion<span>INTERNO</span></div>
+    <div class="meta-item">Autor<span>Whatomate Z.ai</span></div>
+  </div>
+
+  <div class="footer">Whatomate OSINT &middot; Hermes Agent &middot; Shadowbroker &middot; Cognitive API</div>
+</div>
+</body>
+</html>
