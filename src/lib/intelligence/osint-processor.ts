@@ -27,6 +27,8 @@ export interface OsintIngestionResult {
   shipCount: number;
   earthquakeCount: number;
   flightCount: number;
+  gdeltCount: number;
+  newsCount: number;
 }
 
 // ===== MILITARY CALLSIGN DETECTION =====
@@ -279,6 +281,99 @@ async function processShips(
   return { inserted, duplicates };
 }
 
+async function processGdelt(
+  gdelt: NonNullable<OsintSnapshot['gdelt']>,
+  ctx: ProcessorContext
+): Promise<{ inserted: number; duplicates: number }> {
+  let inserted = 0;
+  let duplicates = 0;
+
+  for (const event of gdelt) {
+    const sourceId = `gdelt_${event.name}_${event.date || ''}`;
+    const contentHash = `osint:${sourceId}:${event.name?.substring(0, 50) || 'unknown'}`;
+
+    const existing = await db.rawMessage.findUnique({
+      where: { source_sourceId: { source: 'osint', sourceId } },
+    });
+
+    if (existing) {
+      duplicates++;
+      continue;
+    }
+
+    await db.rawMessage.create({
+      data: {
+        source: 'osint',
+        sourceId,
+        channelName: 'GDELT',
+        channelId: 'osint_gdelt',
+        senderName: event.source || 'GDELT',
+        content: `GDELT Event: ${event.name}${event.url ? ` - ${event.url}` : ''}`,
+        contentHash,
+        timestamp: event.date ? new Date(event.date) : ctx.now,
+        metadata: JSON.stringify({
+          type: 'gdelt',
+          name: event.name,
+          url: event.url,
+          date: event.date,
+          source: event.source,
+        }),
+      },
+    });
+
+    inserted++;
+  }
+
+  return { inserted, duplicates };
+}
+
+async function processNews(
+  news: NonNullable<OsintSnapshot['news']>,
+  ctx: ProcessorContext
+): Promise<{ inserted: number; duplicates: number }> {
+  let inserted = 0;
+  let duplicates = 0;
+
+  for (const article of news) {
+    const sourceId = `news_${article.title}_${article.source}`;
+    const contentHash = `osint:${sourceId}:${article.title?.substring(0, 50) || 'unknown'}`;
+
+    const existing = await db.rawMessage.findUnique({
+      where: { source_sourceId: { source: 'osint', sourceId } },
+    });
+
+    if (existing) {
+      duplicates++;
+      continue;
+    }
+
+    await db.rawMessage.create({
+      data: {
+        source: 'osint',
+        sourceId,
+        channelName: 'News',
+        channelId: 'osint_news',
+        senderName: article.source,
+        content: `News: ${article.title} (${article.source})${article.category ? ` [${article.category}]` : ''}`,
+        contentHash,
+        timestamp: article.publishedAt ? new Date(article.publishedAt) : ctx.now,
+        metadata: JSON.stringify({
+          type: 'news',
+          title: article.title,
+          source: article.source,
+          url: article.url,
+          publishedAt: article.publishedAt,
+          category: article.category,
+        }),
+      },
+    });
+
+    inserted++;
+  }
+
+  return { inserted, duplicates };
+}
+
 // ===== MAIN OSINT PROCESSOR =====
 
 /**
@@ -290,17 +385,19 @@ export async function ingestOsintData(osintData: OsintSnapshot): Promise<OsintIn
   const ctx: ProcessorContext = { now, source: 'osint' };
 
   // Run all OSINT processors
-  const [eqResult, flightResult, weatherResult, fireResult, shipResult] = await Promise.all([
+  const [eqResult, flightResult, weatherResult, fireResult, shipResult, gdeltResult, newsResult] = await Promise.all([
     processEarthquakes(osintData.earthquakes ?? [], ctx),
     processFlights(osintData.flights ?? [], ctx),
     processWeather(osintData.weather, ctx),
     processFires(osintData.fires ?? [], ctx),
     processShips(osintData.ships ?? [], ctx),
+    processGdelt(osintData.gdelt ?? [], ctx),
+    processNews(osintData.news ?? [], ctx),
   ]);
 
   const result: OsintIngestionResult = {
-    inserted: eqResult.inserted + flightResult.inserted + weatherResult.inserted + fireResult.inserted + shipResult.inserted,
-    duplicates: eqResult.duplicates + flightResult.duplicates + weatherResult.duplicates + fireResult.duplicates + shipResult.duplicates,
+    inserted: eqResult.inserted + flightResult.inserted + weatherResult.inserted + fireResult.inserted + shipResult.inserted + gdeltResult.inserted + newsResult.inserted,
+    duplicates: eqResult.duplicates + flightResult.duplicates + weatherResult.duplicates + fireResult.duplicates + shipResult.duplicates + gdeltResult.duplicates + newsResult.duplicates,
     maxMagnitude: eqResult.maxMagnitude,
     militaryFlightCount: flightResult.militaryFlightCount,
     weatherAlertCount: weatherResult.alertCount,
@@ -308,6 +405,8 @@ export async function ingestOsintData(osintData: OsintSnapshot): Promise<OsintIn
     shipCount: osintData.ships?.length ?? 0,
     earthquakeCount: osintData.earthquakes?.length ?? 0,
     flightCount: osintData.flights?.length ?? 0,
+    gdeltCount: osintData.gdelt?.length ?? 0,
+    newsCount: osintData.news?.length ?? 0,
   };
 
   // Update threshold currentValues with OSINT data
@@ -321,6 +420,9 @@ export async function ingestOsintData(osintData: OsintSnapshot): Promise<OsintIn
 
   const weatherThreshold = await db.thresholdConfig.findFirst({ where: { metric: 'weather_alerts' } });
   if (weatherThreshold) await db.thresholdConfig.update({ where: { id: weatherThreshold.id }, data: { currentValue: result.weatherAlertCount } });
+
+  const gdeltThreshold = await db.thresholdConfig.findFirst({ where: { metric: 'gdelt_events' } });
+  if (gdeltThreshold) await db.thresholdConfig.update({ where: { id: gdeltThreshold.id }, data: { currentValue: result.gdeltCount } });
 
   // Update OSINT agent state
   const agentState = await db.agentState.findUnique({ where: { agentId: 'ing-os' } });

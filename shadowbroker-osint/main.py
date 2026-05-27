@@ -396,6 +396,120 @@ def _generate_report(data: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+# ── OSINT Snapshot Transformation ────────────────────────────────────────────
+
+
+def _map_fire_confidence(confidence: str) -> int:
+    """Map FIRMS confidence string to numeric value for OsintSnapshot."""
+    mapping = {"high": 90, "nominal": 50, "low": 20}
+    return mapping.get(str(confidence).strip().lower(), 50)
+
+
+def _transform_to_osint_snapshot(data: dict[str, Any]) -> dict[str, Any]:
+    """Transform internal live-data payload into OsintSnapshot format.
+
+    The OsintSnapshot TypeScript interface expects:
+      earthquakes: [{location, magnitude, depth, time, source}]
+      flights:     [{callsign, type, altitude, heading, zone, time}]
+      weather:     {activeAlerts, extremeEvents}
+      fires:       [{location, confidence, lat, lon}]
+      ships:       [{name, type, lat, lon, speed}]
+      gdelt:       [{name, url?, date?, source?}]
+      news:        [{title, source, url?, publishedAt?, category?}]
+    """
+    now_iso = datetime.now(tz=timezone.utc).isoformat()
+
+    # ── Earthquakes ──
+    earthquakes = []
+    for eq in data.get("earthquakes", []):
+        earthquakes.append({
+            "location": eq.get("title", "Unknown"),
+            "magnitude": eq.get("magnitude", 0),
+            "depth": 0,
+            "time": eq.get("time", ""),
+            "source": "USGS",
+        })
+
+    # ── Flights (flatten military + commercial) ──
+    flights = []
+    for f in data.get("military_flights", []):
+        flights.append({
+            "callsign": f.get("callsign", ""),
+            "type": "military",
+            "altitude": f.get("altitude", 0),
+            "heading": f.get("velocity", 0),
+            "zone": f.get("origin_country", ""),
+            "time": now_iso,
+        })
+    for f in data.get("commercial_flights", []):
+        flights.append({
+            "callsign": f.get("callsign", ""),
+            "type": "commercial",
+            "altitude": f.get("altitude", 0),
+            "heading": f.get("velocity", 0),
+            "zone": f.get("origin_country", ""),
+            "time": now_iso,
+        })
+
+    # ── Weather ──
+    wx_alerts = data.get("weather_alerts", [])
+    extreme_events = [
+        a.get("event", "Unknown")
+        for a in wx_alerts
+        if a.get("severity") in ("Extreme", "Severe")
+    ]
+    weather = {
+        "activeAlerts": len(wx_alerts),
+        "extremeEvents": extreme_events,
+    }
+
+    # ── Fires ──
+    fires = []
+    for f in data.get("firms_fires", []):
+        lat = f.get("lat", 0)
+        lng = f.get("lng", 0)
+        fires.append({
+            "location": f"{lat},{lng}",
+            "confidence": _map_fire_confidence(f.get("confidence", "nominal")),
+            "lat": lat,
+            "lon": lng,
+        })
+
+    # ── Ships (pass through as-is) ──
+    ships = data.get("ships", [])
+
+    # ── GDELT ──
+    gdelt = []
+    for g in data.get("gdelt", []):
+        gdelt.append({
+            "name": g.get("name", ""),
+            "url": g.get("url", ""),
+            "date": "",
+            "source": "GDELT",
+        })
+
+    # ── News ──
+    news = []
+    for n in data.get("news", []):
+        news.append({
+            "title": n.get("title", ""),
+            "source": n.get("source", ""),
+            "url": n.get("url", ""),
+            "publishedAt": "",
+            "category": "",
+        })
+
+    return {
+        "earthquakes": earthquakes,
+        "flights": flights,
+        "weather": weather,
+        "fires": fires,
+        "ships": ships,
+        "gdelt": gdelt,
+        "news": news,
+    }
+
+
 # ── API Endpoints ────────────────────────────────────────────────────────────
 
 
@@ -438,6 +552,31 @@ async def live_data():
             "private_jets": [],
             "commercial_flights": [],
         }
+
+
+@app.get("/api/live-data/osint-snapshot")
+async def live_data_osint_snapshot():
+    """OsintSnapshot-compatible endpoint.
+
+    Fetches all OSINT data and transforms it into the OsintSnapshot format
+    expected by the TypeScript intelligence platform.  Keeps the original
+    /api/live-data endpoint unchanged for backward compatibility.
+    """
+    try:
+        data = await _fetch_all_data()
+        return _transform_to_osint_snapshot(data)
+    except Exception as e:
+        logger.error(f"Error in /api/live-data/osint-snapshot: {e}")
+        return _transform_to_osint_snapshot({
+            "earthquakes": [],
+            "military_flights": [],
+            "commercial_flights": [],
+            "weather_alerts": [],
+            "firms_fires": [],
+            "ships": [],
+            "gdelt": [],
+            "news": [],
+        })
 
 
 @app.get("/api/ai/summary")

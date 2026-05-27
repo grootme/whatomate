@@ -124,12 +124,8 @@ export function MultiagentView() {
   const totalAgents = agentLayers.reduce((sum, l) => sum + l.agents.length, 0);
   const activeAgents = agentLayers.reduce((sum, l) => sum + l.agents.filter((a) => a.status === 'active').length, 0);
   const totalProcessed = agentLayers.reduce((sum, l) => sum + l.agents.reduce((s, a) => s + a.messagesProcessed, 0), 0);
-  const avgHealth = Math.round(
-    agentLayers
-      .flatMap((l) => l.agents)
-      .filter((a) => a.status !== 'inactive')
-      .reduce((sum, a) => sum + a.health, 0) / agentLayers.flatMap((l) => l.agents).filter((a) => a.status !== 'inactive').length
-  );
+  const activeAgentsList = agentLayers.flatMap((l) => l.agents).filter((a) => a.status !== 'inactive');
+  const avgHealth = activeAgentsList.length > 0 ? Math.round(activeAgentsList.reduce((sum, a) => sum + a.health, 0) / activeAgentsList.length) : 0;
 
   return (
     <div className="space-y-6">

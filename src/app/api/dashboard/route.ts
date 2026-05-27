@@ -134,6 +134,34 @@ export async function GET() {
       })
     );
 
+    // ===== Threat Level Computation =====
+    // Based on enabled thresholds where currentValue >= value,
+    // accumulate severity points: CRÍTICA=4, ALTA=3, MEDIA=2, BAJA=1, INFO=0
+    const enabledThresholds = await db.thresholdConfig.findMany({
+      where: { enabled: true },
+    });
+
+    const severityPoints: Record<string, number> = {
+      'CRÍTICA': 4,
+      'ALTA': 3,
+      'MEDIA': 2,
+      'BAJA': 1,
+      'INFO': 0,
+    };
+
+    let threatScore = 0;
+    for (const t of enabledThresholds) {
+      if (t.currentValue >= t.value) {
+        threatScore += severityPoints[t.alertSeverity] ?? 0;
+      }
+    }
+
+    // Map total score to threat level: 0-2=low, 3-5=medium, 6-8=high, 9+=critical
+    const threatLevel: 'low' | 'medium' | 'high' | 'critical' =
+      threatScore >= 9 ? 'critical' :
+      threatScore >= 6 ? 'high' :
+      threatScore >= 3 ? 'medium' : 'low';
+
     return NextResponse.json({
       stats: {
         totalEntities,
@@ -148,6 +176,8 @@ export async function GET() {
       weeklyAnalytics,
       monthlyAnalytics,
       recentActivity,
+      threatLevel,
+      threatScore,
     });
   } catch (error) {
     console.error('Dashboard API error:', error);
@@ -166,6 +196,8 @@ export async function GET() {
         weeklyAnalytics: [],
         monthlyAnalytics: [],
         recentActivity: [],
+        threatLevel: 'low' as const,
+        threatScore: 0,
       },
       { status: 500 }
     );

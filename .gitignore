@@ -111,8 +111,8 @@ agent-ctx/
 # OS artifacts
 .local/
 
-# Binaries (large)
-backend/whatomate
+# Backend duplicate directory
+backend/
 
 # Z scripts (contain secrets)
 .zscripts/
@@ -120,5 +120,3 @@ backend/whatomate
 # Telethon config (has API credentials)
 telethon-service/config.py
 
-# Backend config (has real credentials)
-backend/config.toml

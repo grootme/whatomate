@@ -43,7 +43,7 @@ async function _GET() {
 async function _POST() {
   try {
     // 1. Fetch live OSINT data from shadowbroker service
-    const osintResponse = await fetchService<OsintSnapshot>('osint', '/api/live-data');
+    const osintResponse = await fetchService<OsintSnapshot>('osint', '/api/live-data/osint-snapshot');
 
     if (osintResponse.error || !osintResponse.data) {
       // Mark agent as error if service unavailable

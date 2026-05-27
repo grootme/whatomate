@@ -7,6 +7,7 @@ import { fetchService } from '@/lib/intelligence/service-client';
 import { persistEvent } from '@/lib/intelligence/event-persist';
 import { strategyRegistry } from '@/lib/intelligence/strategies';
 import { buildStrategyContext } from '@/lib/intelligence/context-builder';
+import { runAnomalyDetection } from '@/lib/intelligence/anomaly-detector';
 import type { OsintSnapshot, EventStream } from '@/lib/intelligence/types';
 
 // ===== POST: Run all scheduled tasks =====
@@ -18,18 +19,20 @@ async function _POST() {
     messageProcessing: { success: boolean; processed: number; suspiciousCount: number; entitiesUpdated: number; error?: string };
     strategyEvaluation: { success: boolean; results: Array<{ strategy: string; action: string; confidence: number; reasoning: string }>; alertsGenerated: number; error?: string };
     adaptiveMetrics: { success: boolean; adjustments: string[]; error?: string };
+    anomalyDetection: { success: boolean; anomaliesDetected: number; alertsCreated: number; error?: string };
     schedulerEvent: string;
   } = {
     osintIngestion: { success: false, inserted: 0 },
     messageProcessing: { success: false, processed: 0, suspiciousCount: 0, entitiesUpdated: 0 },
     strategyEvaluation: { success: false, results: [], alertsGenerated: 0 },
     adaptiveMetrics: { success: false, adjustments: [] },
+    anomalyDetection: { success: false, anomaliesDetected: 0, alertsCreated: 0 },
     schedulerEvent: '',
   };
 
   // ===== TASK 1: Fetch and ingest OSINT data =====
   try {
-    const osintResponse = await fetchService<OsintSnapshot>('osint', '/api/live-data');
+    const osintResponse = await fetchService<OsintSnapshot>('osint', '/api/live-data/osint-snapshot');
 
     if (osintResponse.data && !osintResponse.error) {
       const ingestionResult = await ingestOsintData(osintResponse.data);
@@ -155,6 +158,18 @@ async function _POST() {
     summary.adaptiveMetrics = { success: false, adjustments: [], error: err instanceof Error ? err.message : 'Unknown error' };
   }
 
+  // ===== TASK 5: Run anomaly detection =====
+  try {
+    const anomalyResult = await runAnomalyDetection();
+    summary.anomalyDetection = {
+      success: true,
+      anomaliesDetected: anomalyResult.anomaliesDetected,
+      alertsCreated: anomalyResult.alertsCreated,
+    };
+  } catch (err) {
+    summary.anomalyDetection = { success: false, anomaliesDetected: 0, alertsCreated: 0, error: err instanceof Error ? err.message : 'Unknown error' };
+  }
+
   // ===== Create scheduler event using persistEvent =====
   const schedulerEventId = `scheduler_run_${Date.now()}`;
   const durationMs = Date.now() - startTime;
@@ -171,6 +186,8 @@ async function _POST() {
         osintInserted: summary.osintIngestion.inserted,
         messagesProcessed: summary.messageProcessing.processed,
         strategyAlerts: summary.strategyEvaluation.alertsGenerated,
+        anomalyDetections: summary.anomalyDetection.anomaliesDetected,
+        anomalyAlerts: summary.anomalyDetection.alertsCreated,
         adaptiveAdjustments: summary.adaptiveMetrics.adjustments.length,
       },
     },

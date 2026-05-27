@@ -3,6 +3,12 @@
 
 echo "Starting Whatomate ecosystem services..."
 
+# Next.js Intelligence Dashboard
+cd /home/z/my-project
+npx next dev -p 3002 &
+DASHBOARD_PID=$!
+echo "Next.js Dashboard: PID $DASHBOARD_PID (port 3002)"
+
 # WhatsApp Bridge
 cd /home/z/my-project/frontend
 node whatsapp-bridge-stub.cjs &
@@ -27,7 +33,7 @@ sleep 8
 # Verify
 echo ""
 echo "=== Service Status ==="
-for svc in "Bridge:3001" "Hermes:8642" "Shadowbroker:8660"; do
+for svc in "Dashboard:3002" "Bridge:3001" "Hermes:8642" "Shadowbroker:8660"; do
     name="${svc%%:*}"
     port="${svc##*:}"
     if curl -s -m 2 "http://localhost:$port/health" > /dev/null 2>&1; then

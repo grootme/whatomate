@@ -343,6 +343,8 @@ export interface OsintSnapshot {
   weather?: { activeAlerts: number; extremeEvents: string[] };
   fires?: Array<{ location: string; confidence: number; lat: number; lon: number }>;
   ships?: Array<{ name: string; type: string; lat: number; lon: number; speed: number }>;
+  gdelt?: Array<{ name: string; url?: string; date?: string; source?: string }>;
+  news?: Array<{ title: string; source: string; url?: string; publishedAt?: string; category?: string }>;
 }
 
 // ===== SERVICE ENDPOINTS =====
@@ -354,4 +356,5 @@ export const SERVICE_ENDPOINTS = {
   hermes: { host: 'localhost', port: 8642, basePath: '' },
   shadowbrokerAi: { host: 'localhost', port: 8660, basePath: '' },
   backend: { host: 'localhost', port: 8080, basePath: '/api' },
+  dashboard: { host: 'localhost', port: 3002, basePath: '' },
 } as const;

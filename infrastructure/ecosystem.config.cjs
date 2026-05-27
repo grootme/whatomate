@@ -11,6 +11,7 @@
  *
  * Service Ports:
  *   3000  — Vue.js Frontend (Vite)
+ *   3002  — Next.js Intelligence Dashboard
  *   3001  — WhatsApp Bridge (stub)
  *   8642  — Hermes Agent (Telegram bot + orchestrator)
  *   8645  — Cognitive Capital API
@@ -161,7 +162,22 @@ module.exports = {
       watch: false,
     },
 
-    // ─── 7. Vue.js Frontend (port 3000) ─────────────────────────────────
+    // ─── 7. Next.js Intelligence Dashboard (port 3002) ──────────────────────
+    {
+      name: 'next-dashboard',
+      script: 'node_modules/.bin/next',
+      args: 'dev -p 3002',
+      cwd: '/home/z/my-project',
+      env: {
+        NODE_ENV: 'development',
+        PORT: '3002',
+      },
+      autorestart: true,
+      max_restarts: 10,
+      restart_delay: 3000,
+    },
+
+    // ─── 8. Vue.js Frontend (port 3000) ─────────────────────────────────
     {
       name: 'frontend',
       cwd: '/home/z/my-project/frontend',

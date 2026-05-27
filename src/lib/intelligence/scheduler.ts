@@ -9,6 +9,7 @@
  * - Adaptive metrics (every 60 min)
  * - Health checks (every 5 min)
  * - Prediction accuracy tracking (every 60 min)
+ * - Anomaly detection (every 30 min)
  *
  * RICCO Patterns Applied:
  * - Registry Pattern (ADN 3): Task definitions are registered and looked up by ID
@@ -18,6 +19,7 @@
 
 import { db } from '@/lib/db';
 import { persistEvent } from './event-persist';
+import { runAnomalyDetection } from './anomaly-detector';
 import type { DecisionStrategy, EventStream } from './types';
 
 // ===== Types =====
@@ -386,6 +388,20 @@ async function predictionAccuracyHandler(): Promise<{ success: boolean; result?:
   }
 }
 
+/**
+ * Anomaly Detection — runs all 4 statistical anomaly detection methods
+ * (z-score, volume spike, entity behavior, cross-source correlation).
+ * Uses the runAnomalyDetection function from anomaly-detector.ts.
+ */
+async function anomalyDetectionHandler(): Promise<{ success: boolean; result?: unknown; error?: string }> {
+  try {
+    const result = await runAnomalyDetection();
+    return { success: true, result };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
+  }
+}
+
 // ===== Scheduler Configuration — Task Registry =====
 
 const MINUTE = 60 * 1000;
@@ -463,6 +479,15 @@ export const schedulerConfig: ScheduledTask[] = [
     nextRun: initialNextRun(),
     enabled: true,
     handler: predictionAccuracyHandler,
+  },
+  {
+    id: 'anomaly-detection',
+    name: 'Anomaly Detection',
+    intervalMs: 30 * MINUTE,
+    lastRun: null,
+    nextRun: initialNextRun(),
+    enabled: true,
+    handler: anomalyDetectionHandler,
   },
 ];
 

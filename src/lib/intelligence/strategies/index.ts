@@ -10,6 +10,7 @@
 
 import { db } from '@/lib/db';
 import { eventStore } from '../event-store';
+import { notifyAlert, notifyConsensusResult } from '../notification-channel';
 import { shouldAlertSpec, highRiskSpec, actionablePatternSpec } from '../specs';
 import type {
   DecisionStrategy,
@@ -22,6 +23,7 @@ import type {
   RiskAssessment,
   PatternDetection,
   Alert,
+  ConsensusVote,
 } from '../types';
 
 // ===== STRATEGY REGISTRY (Registry-Driven - RICCO ADN 3) =====
@@ -86,7 +88,7 @@ const thresholdStrategy: DecisionStrategyHandler = {
 
     // Create alerts for triggered thresholds
     for (const threshold of triggeredThresholds) {
-      await db.alert.create({
+      const alertRecord = await db.alert.create({
         data: {
           source: 'Threshold Monitor',
           severity: maxSeverity,
@@ -97,6 +99,9 @@ const thresholdStrategy: DecisionStrategyHandler = {
           thresholdId: threshold.id,
         },
       });
+
+      // Notify external channels
+      await notifyAlert(alertRecord as Alert);
 
       // Update threshold lastTriggered
       await db.thresholdConfig.update({
@@ -163,7 +168,7 @@ const patternStrategy: DecisionStrategyHandler = {
     });
 
     // Create alert for pattern detection
-    await db.alert.create({
+    const alertRecord = await db.alert.create({
       data: {
         source: 'Pattern Detector',
         severity: worstPattern.severity,
@@ -174,6 +179,9 @@ const patternStrategy: DecisionStrategyHandler = {
         patternId: worstPattern.id,
       },
     });
+
+    // Notify external channels
+    await notifyAlert(alertRecord as Alert);
 
     await eventStore.append('whatomate:patterns', {
       eventType: 'analysis.pattern_detected',
@@ -285,7 +293,7 @@ const riskScoringStrategy: DecisionStrategyHandler = {
 
       // If high risk, create alert
       if (highRiskSpec.isSatisfiedBy({ assessment: { ...assessment, score: totalScore } as RiskAssessment })) {
-        await db.alert.create({
+        const alertRecord = await db.alert.create({
           data: {
             source: 'Risk Scorer',
             severity: totalScore >= 90 ? 'CRÍTICA' : 'ALTA',
@@ -296,6 +304,9 @@ const riskScoringStrategy: DecisionStrategyHandler = {
             riskId: assessment.id,
           },
         });
+
+        // Notify external channels
+        await notifyAlert(alertRecord as Alert);
       }
     }
 
@@ -428,9 +439,13 @@ const consensusStrategy: DecisionStrategyHandler = {
       },
     });
 
+    // Notify external channels about the alert
+    await notifyAlert(alert as Alert);
+
     // Record individual votes
+    const dbVotes: ConsensusVote[] = [];
     for (const v of votes) {
-      await db.consensusVote.create({
+      const dbVote = await db.consensusVote.create({
         data: {
           alertId: alert.id,
           agentId: v.agentId,
@@ -440,6 +455,7 @@ const consensusStrategy: DecisionStrategyHandler = {
           reasoning: v.reasoning,
         },
       });
+      dbVotes.push(dbVote as ConsensusVote);
     }
 
     await eventStore.append('whatomate:decisions', {
@@ -449,13 +465,18 @@ const consensusStrategy: DecisionStrategyHandler = {
       payload: { favorCount, totalVoting, action, severity, votes },
     });
 
-    return {
+    const result: StrategyResult = {
       action,
       severity,
       confidence: avgConfidence,
       reasoning: `Consenso ${favorCount}/${totalVoting}: ${votes.map(v => `${v.agentName}=${v.vote}`).join(', ')}. Decisión: ${action}`,
       data: { alertId: alert.id, votes },
     };
+
+    // Notify external channels about the consensus result
+    await notifyConsensusResult(dbVotes, result);
+
+    return result;
   },
 };
 
@@ -504,7 +525,7 @@ const predictiveStrategy: DecisionStrategyHandler = {
     const isAnomalous = trendRatio > 3.0; // 3x increase
 
     if (isAnomalous) {
-      await db.alert.create({
+      const alertRecord = await db.alert.create({
         data: {
           source: 'Predictive Engine',
           severity: 'ALTA',
@@ -514,6 +535,9 @@ const predictiveStrategy: DecisionStrategyHandler = {
           strategy: 'predictive',
         },
       });
+
+      // Notify external channels
+      await notifyAlert(alertRecord as Alert);
     }
 
     return {

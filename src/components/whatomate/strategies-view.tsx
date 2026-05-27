@@ -284,6 +284,7 @@ const thresholdChartConfig = {
 
 export function StrategiesView() {
   const {
+    agentLayers,
     thresholds,
     updateThreshold,
     riskDimensions,
@@ -314,7 +315,7 @@ export function StrategiesView() {
           <h2 className="text-xl font-bold">Panel de 6 Estrategias de Decisión</h2>
           <p className="text-sm text-muted-foreground">Configuración interactiva de todas las estrategias del sistema multi-agente</p>
         </div>
-        <Badge className="bg-emerald-600 text-white border-0">19 herramientas activas</Badge>
+        <Badge className="bg-emerald-600 text-white border-0">{agentLayers.reduce((s, l) => s + l.agents.filter(a => a.status === 'active').length, 0)} herramientas activas</Badge>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">

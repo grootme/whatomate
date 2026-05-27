@@ -158,24 +158,30 @@ export const useWhatomateStore = create<WhatomateStore>((set) => ({
   setAlerts: (alerts) => set({ alerts }),
   addAlert: (alert) =>
     set((state) => ({ alerts: [alert, ...state.alerts] })),
-  acknowledgeAlert: (alertId) =>
+  acknowledgeAlert: (alertId) => {
     set((state) => ({
       alerts: state.alerts.map((a) =>
         a.id === alertId ? { ...a, acknowledged: true } : a
       ),
-    })),
-  dismissAlert: (alertId) =>
+    }));
+    fetch(`/api/alerts?id=${alertId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ acknowledged: true }) }).catch(() => {});
+  },
+  dismissAlert: (alertId) => {
     set((state) => ({
       alerts: state.alerts.filter((a) => a.id !== alertId),
-    })),
-  escalateAlert: (alertId) =>
+    }));
+    fetch(`/api/alerts?id=${alertId}`, { method: 'DELETE' }).catch(() => {});
+  },
+  escalateAlert: (alertId) => {
     set((state) => ({
       alerts: state.alerts.map((a) =>
         a.id === alertId
           ? { ...a, severity: 'CRÍTICA' as AlertSeverity, escalated: true, actionTaken: 'ESCALADO - ' + (a.actionTaken || '') }
           : a
       ),
-    })),
+    }));
+    fetch(`/api/alerts?id=${alertId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ escalated: true }) }).catch(() => {});
+  },
 
   // Event Bus
   eventBus: [],
@@ -188,22 +194,26 @@ export const useWhatomateStore = create<WhatomateStore>((set) => ({
   // Strategies — start empty, hydrate from API
   thresholds: [],
   setThresholds: (thresholds) => set({ thresholds }),
-  updateThreshold: (id, value) =>
+  updateThreshold: (id, value) => {
     set((state) => ({
       thresholds: state.thresholds.map((t) =>
         t.id === id ? { ...t, value } : t
       ),
-    })),
+    }));
+    fetch('/api/strategies', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'threshold_update', thresholdId: id, value }) }).catch(() => {});
+  },
   patterns: [],
   setPatterns: (patterns) => set({ patterns }),
   riskDimensions: [],
   setRiskDimensions: (dims) => set({ riskDimensions: dims }),
-  updateRiskDimension: (id, weight) =>
+  updateRiskDimension: (id, weight) => {
     set((state) => ({
       riskDimensions: state.riskDimensions.map((d) =>
         d.id === id ? { ...d, weight } : d
       ),
-    })),
+    }));
+    fetch('/api/strategies', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'risk_dimension_update', dimensionId: id, weight }) }).catch(() => {});
+  },
   consensusVotes: [],
   setConsensusVotes: (votes) => set({ consensusVotes: votes }),
   updateVote: (agentId, vote) =>
