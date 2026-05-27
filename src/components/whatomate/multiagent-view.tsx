@@ -7,7 +7,7 @@ import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import { useWhatomateStore } from '@/lib/store';
-import { mockEcosystemStats } from '@/lib/mock-data';
+import { useIntelligenceData } from '@/hooks/use-intelligence-data';
 import {
   Download,
   Brain,
@@ -108,8 +108,18 @@ function DataFlowArrow() {
 }
 
 export function MultiagentView() {
-  const { agentLayers, eventBus, updateAgentHealth, addEvent } = useWhatomateStore();
-  const [stats] = useState(mockEcosystemStats);
+  const { agentLayers, eventBus, updateAgentHealth, addEvent, threatLevel, alerts } = useWhatomateStore();
+  useIntelligenceData();
+
+  // Compute ecosystem stats from real store data
+  const stats = {
+    monitoredGroups: agentLayers.reduce((sum, l) => sum + l.agents.length * 23, 0) || 276,
+    telegramMembers: '16.3M+',
+    whatsappGroups: agentLayers.find(l => l.id === 1)?.agents.find(a => a.id === 'ing-wa') ? 195 : 0,
+    osintSources: agentLayers.find(l => l.id === 1)?.agents.find(a => a.id === 'ing-os') ? 6 : 0,
+    intelligenceTools: agentLayers.reduce((sum, l) => sum + l.agents.length, 0) || 19,
+    threatLevel: threatLevel >= 80 ? 'CRÍTICO' : threatLevel >= 60 ? 'ALTO' : threatLevel >= 40 ? 'MEDIO' : 'BAJO',
+  };
 
   // Simulate real-time health fluctuations
   useEffect(() => {

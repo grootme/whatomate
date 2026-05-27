@@ -1,20 +1,33 @@
 import { NextResponse } from 'next/server';
-import { mockOsintData } from '@/lib/mock-data';
+import { fetchService } from '@/lib/intelligence/service-client';
 
 export async function GET() {
-  return NextResponse.json({
-    earthquakes: mockOsintData.earthquakes,
-    flights: mockOsintData.flights,
-    weather: mockOsintData.weather,
-    crypto: mockOsintData.crypto,
-    lastUpdated: new Date().toISOString(),
-    sources: {
-      usgs: { status: 'active', lastSync: '2 min ago' },
-      emsc: { status: 'active', lastSync: '5 min ago' },
-      flightAware: { status: 'active', lastSync: '1 min ago' },
-      openWeather: { status: 'active', lastSync: '10 min ago' },
-      coinGecko: { status: 'active', lastSync: '30s ago' },
-      shadowbroker: { status: 'active', lastSync: '3 min ago' },
+  // Fetch real OSINT data from all sources
+  const [report, threat, events] = await Promise.all([
+    fetchService<Record<string, unknown>>('osint', '/report'),
+    fetchService<Record<string, unknown>>('osint', '/threat'),
+    fetchService<Record<string, unknown>>('osint', '/events'),
+  ]);
+
+  // Also fetch from AI bridge for analyzed intel
+  const aiAnalyses = await fetchService<unknown[]>('shadowbrokerAi', '/analyses');
+  const intelEvents = await fetchService<unknown[]>('shadowbrokerAi', '/intel-events');
+
+  const osintData = {
+    earthquakes: (events.data as Record<string, unknown>)?.earthquakes ?? (report.data as Record<string, unknown>)?.earthquakes ?? [],
+    flights: (events.data as Record<string, unknown>)?.flights ?? (report.data as Record<string, unknown>)?.flights ?? [],
+    weather: (events.data as Record<string, unknown>)?.weather ?? (report.data as Record<string, unknown>)?.weather ?? { activeAlerts: 0, extremeEvents: [] },
+    crypto: (events.data as Record<string, unknown>)?.crypto ?? (report.data as Record<string, unknown>)?.crypto ?? [],
+    fires: (events.data as Record<string, unknown>)?.fires ?? (report.data as Record<string, unknown>)?.fires ?? [],
+    ships: (events.data as Record<string, unknown>)?.ships ?? (report.data as Record<string, unknown>)?.ships ?? [],
+    threatLevel: (threat.data as Record<string, unknown>)?.level ?? 'UNKNOWN',
+    aiAnalyses: aiAnalyses.data ?? [],
+    intelEvents: intelEvents.data ?? [],
+    serviceStatus: {
+      osint: !report.error,
+      aiBridge: !aiAnalyses.error,
     },
-  });
+  };
+
+  return NextResponse.json(osintData);
 }

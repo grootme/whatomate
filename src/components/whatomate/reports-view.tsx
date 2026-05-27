@@ -8,8 +8,8 @@ import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import { useWhatomateStore } from '@/lib/store';
-import { mockReportTemplates } from '@/lib/mock-data';
-import type { ReportType, ReportStatus } from '@/lib/mock-data';
+import { useIntelligenceData, reportTemplates, formatDateString } from '@/hooks/use-intelligence-data';
+import type { ReportType, ReportStatus } from '@/lib/intelligence/types';
 import {
   FileOutput,
   Download,
@@ -43,9 +43,10 @@ const statusConfig: Record<ReportStatus, { label: string; color: string; icon: R
 
 export function ReportsView() {
   const { reports, addReport, generatingReport, setGeneratingReport } = useWhatomateStore();
+  useIntelligenceData();
   const [selectedReport, setSelectedReport] = useState<string | null>(null);
   const [filterType, setFilterType] = useState<ReportType | 'all'>('all');
-  const templates = mockReportTemplates;
+  const templates = reportTemplates;
 
   const filteredReports = reports.filter((r) => filterType === 'all' || r.type === filterType);
   const selectedReportData = reports.find((r) => r.id === selectedReport);
@@ -60,11 +61,15 @@ export function ReportsView() {
       const newReport = {
         id: `rep-${Date.now()}`,
         title: `Reporte ${typeLabels[type]} - ${now.getDate()} ${now.toLocaleString('es', { month: 'long' })} ${now.getFullYear()}`,
-        date: now.toISOString().split('T')[0],
+        dateFrom: now.toISOString(),
+        dateTo: now.toISOString(),
         type,
         status: 'completado' as ReportStatus,
         pages: type === 'diario' ? 11 : type === 'semanal' ? 26 : 42,
         sections: template?.sections || [],
+        alertCount: 0,
+        eventCount: 0,
+        entityCount: 0,
         downloadUrl: `/download/reporte-${type}-${Date.now()}.pdf`,
       };
       addReport(newReport);
@@ -282,7 +287,7 @@ export function ReportsView() {
                             </Badge>
                           </div>
                           <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5">
-                            <span>{report.date}</span>
+                            <span>{formatDateString(report.dateFrom)}</span>
                             {report.pages > 0 && <span>{report.pages} páginas</span>}
                             <Badge className={cn('text-[9px] border-0', typeConf.color + ' text-white')}>
                               {typeConf.label}
@@ -341,7 +346,7 @@ export function ReportsView() {
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
                       <div className="p-2 rounded-lg bg-muted/40 text-center">
                         <span className="text-xs text-muted-foreground">Fecha</span>
-                        <p className="text-sm font-semibold">{selectedReportData.date}</p>
+                        <p className="text-sm font-semibold">{formatDateString(selectedReportData.dateFrom)}</p>
                       </div>
                       <div className="p-2 rounded-lg bg-muted/40 text-center">
                         <span className="text-xs text-muted-foreground">Páginas</span>

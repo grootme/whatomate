@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import { useWhatomateStore } from '@/lib/store';
+import { useIntelligenceData, patternTypeLabels, patternTypeSequences, conditionLabel, formatRelativeTime } from '@/hooks/use-intelligence-data';
 import {
   ChartContainer,
   ChartTooltip,
@@ -268,6 +269,7 @@ export function StrategiesView() {
     setLearningRate,
     patterns,
   } = useWhatomateStore();
+  useIntelligenceData();
 
   const predictionData = [
     { hour: '00:00', activity: 45, confidence: 92 },
@@ -351,14 +353,14 @@ export function StrategiesView() {
                           <span className="text-xs text-muted-foreground">{threshold.alertType}</span>
                         </div>
                         <div className="flex items-center gap-3 mb-2">
-                          <span className="text-xs text-muted-foreground w-20">Condición: {threshold.condition}</span>
+                          <span className="text-xs text-muted-foreground w-20">Condición: {conditionLabel(threshold.condition)} {threshold.value} {threshold.unit}</span>
                         </div>
                         <div className="flex items-center gap-4">
                           <div className="flex-1">
                             <Slider
                               value={[threshold.value]}
                               min={1}
-                              max={threshold.maxValue}
+                              max={Math.max(threshold.value * 3, 10)}
                               step={1}
                               onValueChange={(val) => updateThreshold(threshold.id, val[0])}
                               className="w-full"
@@ -369,8 +371,8 @@ export function StrategiesView() {
                           </span>
                         </div>
                         <div className="flex items-center justify-between mt-2 text-xs">
-                          <span className="text-muted-foreground">Valor actual: <span className={threshold.current >= threshold.value ? 'text-red-600 font-bold' : 'text-emerald-600 font-bold'}>{threshold.current}</span></span>
-                          <Progress value={(threshold.current / threshold.value) * 100} className="h-1.5 w-24" />
+                          <span className="text-muted-foreground">Valor actual: <span className={threshold.currentValue >= threshold.value ? 'text-red-600 font-bold' : 'text-emerald-600 font-bold'}>{threshold.currentValue}</span></span>
+                          <Progress value={(threshold.currentValue / threshold.value) * 100} className="h-1.5 w-24" />
                         </div>
                       </motion.div>
                     ))}
@@ -382,7 +384,7 @@ export function StrategiesView() {
                       </CardHeader>
                       <CardContent>
                         <ChartContainer config={thresholdChartConfig} className="h-[280px] w-full">
-                          <BarChart data={thresholds.map((t) => ({ name: t.name.split(' ').slice(0, 2).join(' '), current: t.current, value: t.value }))} layout="vertical">
+                          <BarChart data={thresholds.map((t) => ({ name: t.name.split(' ').slice(0, 2).join(' '), current: t.currentValue, value: t.value }))} layout="vertical">
                             <CartesianGrid strokeDasharray="3 3" horizontal={false} />
                             <XAxis type="number" tickLine={false} fontSize={10} />
                             <YAxis dataKey="name" type="category" tickLine={false} width={80} fontSize={10} />
@@ -428,7 +430,7 @@ export function StrategiesView() {
                     )}
                   >
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm font-bold">{pattern.name}</span>
+                      <span className="text-sm font-bold">{patternTypeLabels[pattern.patternType] || pattern.patternType}</span>
                       <Badge className={cn('text-[10px]', severityColors[pattern.severity])}>
                         {pattern.severity}
                       </Badge>
@@ -437,7 +439,7 @@ export function StrategiesView() {
                     
                     {/* Sequence Diagram */}
                     <div className="flex items-center gap-1 mb-3 overflow-x-auto pb-1">
-                      {pattern.sequence.map((step, sIdx) => (
+                      {(patternTypeSequences[pattern.patternType] || []).map((step, sIdx) => (
                         <React.Fragment key={sIdx}>
                           <div className="flex flex-col items-center min-w-[70px]">
                             <div className="w-6 h-6 rounded-full bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300 flex items-center justify-center text-[10px] font-bold">
@@ -445,7 +447,7 @@ export function StrategiesView() {
                             </div>
                             <span className="text-[9px] text-muted-foreground text-center mt-1 leading-tight">{step}</span>
                           </div>
-                          {sIdx < pattern.sequence.length - 1 && (
+                          {sIdx < (patternTypeSequences[pattern.patternType] || []).length - 1 && (
                             <ArrowRight className="w-3 h-3 text-muted-foreground shrink-0" />
                           )}
                         </React.Fragment>
@@ -455,12 +457,12 @@ export function StrategiesView() {
                     <div className="flex items-center justify-between text-xs">
                       <div className="flex items-center gap-2">
                         <span className="text-muted-foreground">Detección:</span>
-                        <span className="font-bold text-emerald-600">{pattern.detectionRate}%</span>
+                        <span className="font-bold text-emerald-600">{pattern.detectionRate ?? pattern.confidence}%</span>
                       </div>
-                      <span className="text-muted-foreground">Último: {pattern.lastDetected}</span>
+                      <span className="text-muted-foreground">Último: {formatRelativeTime(pattern.lastDetected)}</span>
                     </div>
                     <div className="flex items-center justify-between text-xs mt-1">
-                      <Progress value={pattern.detectionRate} className="h-1.5 flex-1 mr-3" />
+                      <Progress value={pattern.detectionRate ?? pattern.confidence} className="h-1.5 flex-1 mr-3" />
                       <span className="text-muted-foreground">{pattern.occurrences} casos</span>
                     </div>
                   </motion.div>

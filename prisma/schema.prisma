@@ -1,9 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -13,20 +7,260 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+// ===== EVENT SOURCING =====
+model IntelligenceEvent {
+  id            String   @id @default(cuid())
+  eventType     String   // ingestion.raw_message | analysis.semantic | analysis.pattern | analysis.risk_score | monitoring.threshold_breach | monitoring.alert | report.generated
+  aggregateId   String   // entity ID this event relates to
+  aggregateType String   // message | entity | alert | report | agent
+  stream        String   // whatomate:whatsapp_messages | whatomate:analyzed_messages | etc
+  payload       String   // JSON payload
+  metadata      String?  // JSON metadata (source, confidence, etc.)
+  timestamp     DateTime @default(now())
+  processed     Boolean  @default(false)
+
+  @@index([eventType])
+  @@index([aggregateId])
+  @@index([stream])
+  @@index([timestamp])
+  @@index([processed])
 }
 
-model Post {
-  id        String   @id @default(cuid())
-  title     String
-  content   String?
-  published Boolean  @default(false)
-  authorId  String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+// ===== INGESTION LAYER =====
+model RawMessage {
+  id          String    @id @default(cuid())
+  source      String    // whatsapp | telegram | osint
+  sourceId    String    // original message ID from source
+  channelName String?   // group/channel name
+  channelId   String?   // group/channel ID
+  senderName  String?
+  senderId    String?
+  content     String
+  contentHash String?   // for deduplication
+  timestamp   DateTime
+  processed   Boolean   @default(false)
+  analyzedAt  DateTime?
+  metadata    String?   // JSON: mediaType, replyTo, forwarded, etc.
+  createdAt   DateTime  @default(now())
+
+  @@unique([source, sourceId])
+  @@index([source])
+  @@index([channelId])
+  @@index([timestamp])
+  @@index([processed])
+  @@index([contentHash])
+}
+
+// ===== ANALYSIS LAYER =====
+model Entity {
+  id           String   @id @default(cuid())
+  name         String
+  type         String   // person | organization | location | crypto_wallet | event
+  aliases      String?  // JSON array of aliases
+  riskScore    Int      @default(0) // 0-100
+  riskLevel    String   @default("low") // low | medium | high | critical
+  platformIds  String?  // JSON: { whatsapp: [...], telegram: [...] }
+  firstSeen    DateTime @default(now())
+  lastSeen     DateTime @default(now())
+  mentionCount Int      @default(0)
+  metadata     String?  // JSON: additional properties
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([type])
+  @@index([riskLevel])
+  @@index([name])
+}
+
+model EntityRelation {
+  id           String   @id @default(cuid())
+  fromEntityId String
+  toEntityId   String
+  relationType String   // communicates_with | member_of | operates_in | transfers_to | mentions
+  strength     Float    @default(1.0) // 0-1 connection strength
+  evidence     String?  // JSON array of evidence message IDs
+  firstSeen    DateTime @default(now())
+  lastSeen     DateTime @default(now())
+  createdAt    DateTime @default(now())
+
+  @@index([fromEntityId])
+  @@index([toEntityId])
+  @@index([relationType])
+}
+
+model PatternDetection {
+  id            String   @id @default(cuid())
+  patternType   String   // fraud_multichannel | money_laundering | disinformation | crypto_manipulation | irregular_migration
+  severity      String   // CRÍTICA | ALTA | MEDIA | BAJA | INFO
+  confidence    Float    // 0-100
+  description   String
+  evidenceIds   String?  // JSON array of RawMessage IDs
+  entityIds     String?  // JSON array of Entity IDs
+  detectionRate Float?   // historical detection accuracy
+  occurrences   Int      @default(1)
+  status        String   @default("active") // active | confirmed | dismissed | investigating
+  firstDetected DateTime @default(now())
+  lastDetected  DateTime @default(now())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([patternType])
+  @@index([severity])
+  @@index([status])
+}
+
+model RiskAssessment {
+  id            String   @id @default(cuid())
+  entityId      String?
+  patternId     String?
+  aggregateType String   // entity | pattern | channel | system
+  aggregateId   String
+  score         Int      // 0-100
+  nature        Int      @default(0) // 0-100 weighted dimension
+  volume        Int      @default(0)
+  connections   Int      @default(0)
+  osintContext  Int      @default(0)
+  recency       Int      @default(0)
+  reasoning     String?  // AI explanation
+  strategy      String   // threshold | pattern | risk_scoring | consensus | predictive | adaptive
+  createdAt     DateTime @default(now())
+
+  @@index([entityId])
+  @@index([score])
+  @@index([strategy])
+  @@index([createdAt])
+}
+
+// ===== MONITORING LAYER =====
+model ThresholdConfig {
+  id            String    @id @default(cuid())
+  name          String
+  description   String
+  metric        String    // fraud_mentions_per_hour | earthquake_magnitude | military_flights | suspicious_messages | inactive_group_activity | weather_alerts
+  condition     String    // gte | lte | eq | gt | lt
+  value         Float
+  unit          String
+  alertSeverity String    // CRÍTICA | ALTA | MEDIA | BAJA | INFO
+  alertType     String
+  enabled       Boolean   @default(true)
+  currentValue  Float     @default(0)
+  lastTriggered DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([metric])
+  @@index([enabled])
+}
+
+model Alert {
+  id             String    @id @default(cuid())
+  source         String    // agent ID that generated the alert
+  severity       String    // CRÍTICA | ALTA | MEDIA | BAJA | INFO
+  title          String
+  description    String
+  actionTaken    String?
+  strategy       String    // threshold | pattern | risk_scoring | consensus | predictive | adaptive
+  thresholdId    String?
+  patternId      String?
+  riskId         String?
+  acknowledged   Boolean   @default(false)
+  acknowledgedBy String?
+  acknowledgedAt DateTime?
+  escalated      Boolean   @default(false)
+  relatedEvents  String?   // JSON array of IntelligenceEvent IDs
+  timestamp      DateTime  @default(now())
+  createdAt      DateTime  @default(now())
+
+  @@index([severity])
+  @@index([acknowledged])
+  @@index([timestamp])
+  @@index([strategy])
+}
+
+// ===== CONSENSUS =====
+model ConsensusVote {
+  id         String   @id @default(cuid())
+  alertId    String
+  agentId    String
+  agentName  String
+  vote       String   // favor | contra | abstencion
+  confidence Float    // 0-100
+  reasoning  String
+  createdAt  DateTime @default(now())
+
+  @@index([alertId])
+  @@index([agentId])
+}
+
+// ===== REPORTS =====
+model Report {
+  id           String    @id @default(cuid())
+  title        String
+  type         String    // diario | semanal | mensual
+  status       String    @default("programado") // programado | generando | completado | error
+  pages        Int       @default(0)
+  sections     String    // JSON array of section names
+  dateFrom     DateTime
+  dateTo       DateTime
+  alertCount   Int       @default(0)
+  eventCount   Int       @default(0)
+  entityCount  Int       @default(0)
+  generatedAt  DateTime?
+  content      String?   // Markdown content of the report
+  downloadUrl  String?
+  createdAt    DateTime  @default(now())
+
+  @@index([type])
+  @@index([status])
+  @@index([dateFrom])
+}
+
+// ===== AGENTS =====
+model AgentState {
+  id                String    @id @default(cuid())
+  agentId           String    @unique
+  name              String
+  layer             Int
+  layerName         String
+  status            String    @default("inactive") // active | inactive | warning | error
+  health            Int       @default(0) // 0-100
+  messagesProcessed Int       @default(0)
+  lastHeartbeat     DateTime?
+  startedAt         DateTime?
+  config            String?   // JSON: agent-specific configuration
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([layer])
+  @@index([status])
+}
+
+// ===== ADAPTIVE LEARNING =====
+model AdaptiveMetric {
+  id                String   @id @default(cuid())
+  date              DateTime
+  falsePositiveRate Float
+  sensitivity       Float
+  accuracy          Float
+  threshold         String   // which threshold this metric relates to
+  adjustment        String?  // JSON: what adjustment was made
+  createdAt         DateTime @default(now())
+
+  @@index([date])
+  @@index([threshold])
+}
+
+model Prediction {
+  id           String    @id @default(cuid())
+  metric       String    // activity | risk | threat_level
+  period       String    // hour | day | week
+  predictedAt  DateTime
+  targetTime   DateTime
+  value        Float
+  confidence   Float
+  actualValue  Float?
+  createdAt    DateTime  @default(now())
+
+  @@index([metric])
+  @@index([targetTime])
 }

@@ -1,9 +1,11 @@
 import { NextResponse } from 'next/server';
+import { SERVICE_ENDPOINTS } from '@/lib/intelligence/types';
 
-// Proxy QR code from Baileys bridge
+// Proxy QR code from Baileys bridge via gateway
 export async function GET() {
+  const endpoint = SERVICE_ENDPOINTS.whatsapp;
   try {
-    const res = await fetch('http://127.0.0.1:3001/qr', {
+    const res = await fetch(`/api/qr?XTransformPort=${endpoint.port}`, {
       signal: AbortSignal.timeout(8000),
     });
 
@@ -31,13 +33,14 @@ export async function GET() {
       status: data.status || 'unknown',
       message: data.message || '',
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     // Bridge not available
+    const message = err instanceof Error ? err.message : 'connection refused';
     return NextResponse.json({
       error: 'Baileys bridge not available',
       qr: null,
       status: 'offline',
-      message: `WhatsApp bridge at port 3001 is not responding: ${err.message || 'connection refused'}`,
+      message: `WhatsApp bridge at port ${endpoint.port} is not responding: ${message}`,
     }, { status: 503 });
   }
 }

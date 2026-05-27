@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import { useWhatomateStore } from '@/lib/store';
+import { useIntelligenceData, formatTimestamp } from '@/hooks/use-intelligence-data';
 import {
   ChartContainer,
   ChartTooltip,
@@ -68,6 +69,7 @@ const PIE_COLORS = ['#EF4444', '#F97316', '#F59E0B', '#14B8A6', '#9CA3AF'];
 
 export function MonitoringView() {
   const { alerts, addAlert, acknowledgeAlert, dismissAlert, escalateAlert, threatLevel } = useWhatomateStore();
+  useIntelligenceData();
   const [severityFilter, setSeverityFilter] = useState<string>('all');
   const [sourceFilter, setSourceFilter] = useState<string>('all');
   const [expandedAlert, setExpandedAlert] = useState<string | null>(null);
@@ -94,13 +96,15 @@ export function MonitoringView() {
       const title = titles[Math.floor(Math.random() * titles.length)];
       const alert = {
         id: `live-${Date.now()}`,
-        timestamp: `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`,
+        timestamp: formatTimestamp(now),
         source: src,
         severity: sev,
         title,
         description: `Alerta generada automáticamente por el sistema de monitoreo. Fuente: ${src}. Se requiere revisión del evento detectado.`,
         actionTaken: 'Notificación automática enviada.',
+        strategy: 'threshold' as const,
         acknowledged: false,
+        escalated: false,
       };
       addAlert(alert);
     }, 8000);
@@ -376,7 +380,7 @@ export function MonitoringView() {
                           <Badge className={cn('text-[10px]', severityBadgeColors[alert.severity])}>
                             {alert.severity}
                           </Badge>
-                          <span className="text-xs font-mono text-muted-foreground">{alert.timestamp}</span>
+                          <span className="text-xs font-mono text-muted-foreground">{formatTimestamp(alert.timestamp)}</span>
                           <span className="text-xs text-muted-foreground">•</span>
                           <span className="text-xs font-medium">{alert.source}</span>
                           {alert.acknowledged && (
@@ -393,7 +397,7 @@ export function MonitoringView() {
                             <p className="text-xs text-muted-foreground mt-2">{alert.description}</p>
                             <div className="mt-2 p-2 bg-background rounded-lg text-xs">
                               <span className="font-medium">Acción tomada: </span>
-                              <span className="text-muted-foreground">{alert.actionTaken}</span>
+                              <span className="text-muted-foreground">{alert.actionTaken || 'Sin acción registrada'}</span>
                             </div>
                           </motion.div>
                         )}
