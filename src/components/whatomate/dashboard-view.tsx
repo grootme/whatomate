@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -15,6 +15,7 @@ import {
   Plus,
   Zap,
   ArrowRight,
+  Loader2,
 } from 'lucide-react';
 import {
   ChartContainer,
@@ -23,11 +24,6 @@ import {
   type ChartConfig,
 } from '@/components/ui/chart';
 import { Bar, BarChart, XAxis, YAxis, CartesianGrid } from 'recharts';
-import {
-  mockDashboardStats,
-  mockConversations,
-  mockWeeklyAnalytics,
-} from '@/lib/mock-data';
 
 const chartConfig = {
   sent: {
@@ -40,41 +36,86 @@ const chartConfig = {
   },
 } satisfies ChartConfig;
 
+interface DashboardStats {
+  totalContacts: number;
+  activeConversations: number;
+  messagesSent: number;
+  templates: number;
+  contactGrowth: number;
+  conversationGrowth: number;
+  messageGrowth: number;
+  templateGrowth: number;
+}
+
+interface WeeklyAnalytics {
+  day: string;
+  sent: number;
+  received: number;
+}
+
+interface RecentConversation {
+  id: string;
+  contactName: string;
+  lastMessage: string;
+  lastMessageTime: string;
+  unreadCount: number;
+  status: string;
+}
+
 export function DashboardView() {
-  const stats = [
-    {
-      title: 'Total Contacts',
-      value: mockDashboardStats.totalContacts.toLocaleString(),
-      change: `+${mockDashboardStats.contactGrowth}%`,
-      trend: 'up' as const,
-      icon: Users,
-      color: 'bg-[#25D366]/10 text-[#25D366]',
-    },
-    {
-      title: 'Active Conversations',
-      value: mockDashboardStats.activeConversations.toLocaleString(),
-      change: `${mockDashboardStats.conversationGrowth}%`,
-      trend: 'down' as const,
-      icon: MessageSquare,
-      color: 'bg-blue-500/10 text-blue-500',
-    },
-    {
-      title: 'Messages Sent',
-      value: mockDashboardStats.messagesSent.toLocaleString(),
-      change: `+${mockDashboardStats.messageGrowth}%`,
-      trend: 'up' as const,
-      icon: Send,
-      color: 'bg-orange-500/10 text-orange-500',
-    },
-    {
-      title: 'Templates',
-      value: mockDashboardStats.templates.toString(),
-      change: `+${mockDashboardStats.templateGrowth}%`,
-      trend: 'up' as const,
-      icon: FileText,
-      color: 'bg-purple-500/10 text-purple-500',
-    },
-  ];
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [weeklyAnalytics, setWeeklyAnalytics] = useState<WeeklyAnalytics[]>([]);
+  const [recentConversations, setRecentConversations] = useState<RecentConversation[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch('/api/dashboard')
+      .then((res) => res.json())
+      .then((data) => {
+        setStats(data.stats);
+        setWeeklyAnalytics(data.weeklyAnalytics || []);
+        setRecentConversations(data.recentConversations || []);
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, []);
+
+  const statCards = stats
+    ? [
+        {
+          title: 'Total Contacts',
+          value: stats.totalContacts.toLocaleString(),
+          change: `${stats.contactGrowth >= 0 ? '+' : ''}${stats.contactGrowth}%`,
+          trend: stats.contactGrowth >= 0 ? ('up' as const) : ('down' as const),
+          icon: Users,
+          color: 'bg-[#25D366]/10 text-[#25D366]',
+        },
+        {
+          title: 'Active Conversations',
+          value: stats.activeConversations.toLocaleString(),
+          change: `${stats.conversationGrowth >= 0 ? '+' : ''}${stats.conversationGrowth}%`,
+          trend: stats.conversationGrowth >= 0 ? ('up' as const) : ('down' as const),
+          icon: MessageSquare,
+          color: 'bg-blue-500/10 text-blue-500',
+        },
+        {
+          title: 'Messages Sent',
+          value: stats.messagesSent.toLocaleString(),
+          change: `${stats.messageGrowth >= 0 ? '+' : ''}${stats.messageGrowth}%`,
+          trend: stats.messageGrowth >= 0 ? ('up' as const) : ('down' as const),
+          icon: Send,
+          color: 'bg-orange-500/10 text-orange-500',
+        },
+        {
+          title: 'Templates',
+          value: stats.templates.toString(),
+          change: `${stats.templateGrowth >= 0 ? '+' : ''}${stats.templateGrowth}%`,
+          trend: stats.templateGrowth >= 0 ? ('up' as const) : ('down' as const),
+          icon: FileText,
+          color: 'bg-purple-500/10 text-purple-500',
+        },
+      ]
+    : [];
 
   const quickActions = [
     { label: 'New Message', icon: Send, color: 'bg-[#25D366] hover:bg-[#128C7E]' },
@@ -83,11 +124,19 @@ export function DashboardView() {
     { label: 'Start Campaign', icon: Zap, color: 'bg-[#25D366] hover:bg-[#128C7E]' },
   ];
 
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="w-8 h-8 animate-spin text-[#25D366]" />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {stats.map((stat) => (
+        {statCards.map((stat) => (
           <Card key={stat.title} className="border-0 shadow-sm hover:shadow-md transition-shadow">
             <CardContent className="p-4">
               <div className="flex items-start justify-between">
@@ -125,27 +174,33 @@ export function DashboardView() {
             </div>
           </CardHeader>
           <CardContent>
-            <ChartContainer config={chartConfig} className="h-[280px] w-full">
-              <BarChart data={mockWeeklyAnalytics} barGap={4}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                <XAxis
-                  dataKey="day"
-                  tickLine={false}
-                  axisLine={false}
-                  tickMargin={8}
-                  fontSize={12}
-                />
-                <YAxis
-                  tickLine={false}
-                  axisLine={false}
-                  tickMargin={8}
-                  fontSize={12}
-                />
-                <ChartTooltip content={<ChartTooltipContent />} />
-                <Bar dataKey="sent" fill="var(--color-sent)" radius={[4, 4, 0, 0]} />
-                <Bar dataKey="received" fill="var(--color-received)" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ChartContainer>
+            {weeklyAnalytics.length > 0 ? (
+              <ChartContainer config={chartConfig} className="h-[280px] w-full">
+                <BarChart data={weeklyAnalytics} barGap={4}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                  <XAxis
+                    dataKey="day"
+                    tickLine={false}
+                    axisLine={false}
+                    tickMargin={8}
+                    fontSize={12}
+                  />
+                  <YAxis
+                    tickLine={false}
+                    axisLine={false}
+                    tickMargin={8}
+                    fontSize={12}
+                  />
+                  <ChartTooltip content={<ChartTooltipContent />} />
+                  <Bar dataKey="sent" fill="var(--color-sent)" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="received" fill="var(--color-received)" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ChartContainer>
+            ) : (
+              <div className="h-[280px] flex items-center justify-center text-muted-foreground text-sm">
+                No analytics data available yet
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -180,51 +235,57 @@ export function DashboardView() {
           </div>
         </CardHeader>
         <CardContent>
-          <div className="space-y-1">
-            {mockConversations.map((conv) => (
-              <div
-                key={conv.id}
-                className="flex items-center gap-3 p-3 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
-              >
-                <Avatar className="h-10 w-10 shrink-0">
-                  <AvatarFallback className="bg-[#25D366]/10 text-[#25D366] text-sm font-semibold">
-                    {conv.contactName.split(' ').map(n => n[0]).join('')}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between">
-                    <p className="font-medium text-sm truncate">{conv.contactName}</p>
-                    <span className="text-xs text-muted-foreground whitespace-nowrap ml-2">
-                      {conv.lastMessageTime}
-                    </span>
+          {recentConversations.length > 0 ? (
+            <div className="space-y-1">
+              {recentConversations.map((conv) => (
+                <div
+                  key={conv.id}
+                  className="flex items-center gap-3 p-3 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
+                >
+                  <Avatar className="h-10 w-10 shrink-0">
+                    <AvatarFallback className="bg-[#25D366]/10 text-[#25D366] text-sm font-semibold">
+                      {conv.contactName.split(' ').map(n => n[0]).join('')}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <p className="font-medium text-sm truncate">{conv.contactName}</p>
+                      <span className="text-xs text-muted-foreground whitespace-nowrap ml-2">
+                        {conv.lastMessageTime}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground truncate mt-0.5">
+                      {conv.lastMessage}
+                    </p>
                   </div>
-                  <p className="text-xs text-muted-foreground truncate mt-0.5">
-                    {conv.lastMessage}
-                  </p>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Badge
+                      variant={
+                        conv.status === 'active' ? 'default' :
+                        conv.status === 'pending' ? 'secondary' : 'outline'
+                      }
+                      className={`text-[10px] ${
+                        conv.status === 'active' ? 'bg-[#25D366] text-white border-0' :
+                        conv.status === 'pending' ? 'bg-orange-100 text-orange-700 border-0' :
+                        'bg-gray-100 text-gray-600 border-0'
+                      }`}
+                    >
+                      {conv.status}
+                    </Badge>
+                    {conv.unreadCount > 0 && (
+                      <span className="bg-[#25D366] text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full">
+                        {conv.unreadCount}
+                      </span>
+                    )}
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <Badge
-                    variant={
-                      conv.status === 'active' ? 'default' :
-                      conv.status === 'pending' ? 'secondary' : 'outline'
-                    }
-                    className={`text-[10px] ${
-                      conv.status === 'active' ? 'bg-[#25D366] text-white border-0' :
-                      conv.status === 'pending' ? 'bg-orange-100 text-orange-700 border-0' :
-                      'bg-gray-100 text-gray-600 border-0'
-                    }`}
-                  >
-                    {conv.status}
-                  </Badge>
-                  {conv.unreadCount > 0 && (
-                    <span className="bg-[#25D366] text-white text-[10px] font-bold w-5 h-5 flex items-center justify-center rounded-full">
-                      {conv.unreadCount}
-                    </span>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div className="py-8 text-center text-muted-foreground text-sm">
+              No conversations yet. Data will appear once messages are ingested.
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

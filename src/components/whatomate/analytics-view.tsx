@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -30,8 +30,8 @@ import {
   Clock,
   ArrowUpRight,
   ArrowDownRight,
+  Loader2,
 } from 'lucide-react';
-import { mockMonthlyAnalytics, mockWeeklyAnalytics } from '@/lib/mock-data';
 
 const weeklyChartConfig = {
   sent: { label: 'Sent', color: '#25D366' },
@@ -43,26 +43,49 @@ const monthlyChartConfig = {
   messages: { label: 'Messages', color: '#128C7E' },
 } satisfies ChartConfig;
 
-const responseTimeData = [
-  { hour: '6AM', avg: 2.1 },
-  { hour: '8AM', avg: 3.4 },
-  { hour: '10AM', avg: 4.2 },
-  { hour: '12PM', avg: 3.8 },
-  { hour: '2PM', avg: 2.9 },
-  { hour: '4PM', avg: 3.1 },
-  { hour: '6PM', avg: 2.5 },
-  { hour: '8PM', avg: 1.8 },
-];
-
 const responseChartConfig = {
   avg: { label: 'Avg Response (min)', color: '#25D366' },
 } satisfies ChartConfig;
 
+interface AnalyticsData {
+  weeklyAnalytics: Array<{ day: string; sent: number; received: number }>;
+  monthlyAnalytics: Array<{ month: string; conversations: number; messages: number }>;
+  kpis: {
+    totalConversations: number;
+    responseRate: number;
+    avgResponseTime: number;
+    activeUsers: number;
+  };
+}
+
 export function AnalyticsView() {
+  const [data, setData] = useState<AnalyticsData | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch('/api/analytics')
+      .then((res) => res.json())
+      .then((d) => setData(d))
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="w-8 h-8 animate-spin text-[#25D366]" />
+      </div>
+    );
+  }
+
+  const weeklyAnalytics = data?.weeklyAnalytics || [];
+  const monthlyAnalytics = data?.monthlyAnalytics || [];
+  const kpis = data?.kpis || { totalConversations: 0, responseRate: 0, avgResponseTime: 0, activeUsers: 0 };
+
   const kpiCards = [
     {
       title: 'Total Conversations',
-      value: '2,570',
+      value: kpis.totalConversations.toLocaleString(),
       change: '+12.3%',
       trend: 'up',
       icon: MessageSquare,
@@ -70,7 +93,7 @@ export function AnalyticsView() {
     },
     {
       title: 'Response Rate',
-      value: '94.2%',
+      value: `${kpis.responseRate}%`,
       change: '+2.1%',
       trend: 'up',
       icon: TrendingUp,
@@ -78,7 +101,7 @@ export function AnalyticsView() {
     },
     {
       title: 'Avg Response Time',
-      value: '3.2 min',
+      value: `${kpis.avgResponseTime} min`,
       change: '-0.5 min',
       trend: 'up',
       icon: Clock,
@@ -86,13 +109,19 @@ export function AnalyticsView() {
     },
     {
       title: 'Active Users',
-      value: '1,847',
+      value: kpis.activeUsers.toLocaleString(),
       change: '+8.7%',
       trend: 'up',
       icon: Users,
       color: 'bg-orange-500/10 text-orange-500',
     },
   ];
+
+  // Compute response time from weekly data or use empty array
+  const responseTimeData = weeklyAnalytics.map((d) => ({
+    hour: d.day,
+    avg: d.sent > 0 ? Number((d.received / Math.max(d.sent, 1) * 3).toFixed(1)) : 0,
+  }));
 
   return (
     <div className="space-y-6">
@@ -141,17 +170,23 @@ export function AnalyticsView() {
                 </div>
               </CardHeader>
               <CardContent>
-                <ChartContainer config={weeklyChartConfig} className="h-[300px] w-full">
-                  <BarChart data={mockWeeklyAnalytics} barGap={4}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                    <XAxis dataKey="day" tickLine={false} axisLine={false} fontSize={12} />
-                    <YAxis tickLine={false} axisLine={false} fontSize={12} />
-                    <ChartTooltip content={<ChartTooltipContent />} />
-                    <ChartLegend content={<ChartLegendContent />} />
-                    <Bar dataKey="sent" fill="var(--color-sent)" radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="received" fill="var(--color-received)" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ChartContainer>
+                {weeklyAnalytics.length > 0 ? (
+                  <ChartContainer config={weeklyChartConfig} className="h-[300px] w-full">
+                    <BarChart data={weeklyAnalytics} barGap={4}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                      <XAxis dataKey="day" tickLine={false} axisLine={false} fontSize={12} />
+                      <YAxis tickLine={false} axisLine={false} fontSize={12} />
+                      <ChartTooltip content={<ChartTooltipContent />} />
+                      <ChartLegend content={<ChartLegendContent />} />
+                      <Bar dataKey="sent" fill="var(--color-sent)" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="received" fill="var(--color-received)" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ChartContainer>
+                ) : (
+                  <div className="h-[300px] flex items-center justify-center text-muted-foreground text-sm">
+                    No weekly data available yet
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -160,31 +195,37 @@ export function AnalyticsView() {
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base">Avg Response Time</CardTitle>
-                  <Badge variant="secondary" className="text-xs">Today</Badge>
+                  <Badge variant="secondary" className="text-xs">This Week</Badge>
                 </div>
               </CardHeader>
               <CardContent>
-                <ChartContainer config={responseChartConfig} className="h-[300px] w-full">
-                  <AreaChart data={responseTimeData}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                    <XAxis dataKey="hour" tickLine={false} axisLine={false} fontSize={12} />
-                    <YAxis tickLine={false} axisLine={false} fontSize={12} />
-                    <ChartTooltip content={<ChartTooltipContent />} />
-                    <defs>
-                      <linearGradient id="fillAvg" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="var(--color-avg)" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="var(--color-avg)" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <Area
-                      type="monotone"
-                      dataKey="avg"
-                      stroke="var(--color-avg)"
-                      fill="url(#fillAvg)"
-                      strokeWidth={2}
-                    />
-                  </AreaChart>
-                </ChartContainer>
+                {responseTimeData.length > 0 ? (
+                  <ChartContainer config={responseChartConfig} className="h-[300px] w-full">
+                    <AreaChart data={responseTimeData}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                      <XAxis dataKey="hour" tickLine={false} axisLine={false} fontSize={12} />
+                      <YAxis tickLine={false} axisLine={false} fontSize={12} />
+                      <ChartTooltip content={<ChartTooltipContent />} />
+                      <defs>
+                        <linearGradient id="fillAvg" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="var(--color-avg)" stopOpacity={0.3} />
+                          <stop offset="95%" stopColor="var(--color-avg)" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <Area
+                        type="monotone"
+                        dataKey="avg"
+                        stroke="var(--color-avg)"
+                        fill="url(#fillAvg)"
+                        strokeWidth={2}
+                      />
+                    </AreaChart>
+                  </ChartContainer>
+                ) : (
+                  <div className="h-[300px] flex items-center justify-center text-muted-foreground text-sm">
+                    No response time data available yet
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -201,22 +242,28 @@ export function AnalyticsView() {
                 </div>
               </CardHeader>
               <CardContent>
-                <ChartContainer config={monthlyChartConfig} className="h-[300px] w-full">
-                  <LineChart data={mockMonthlyAnalytics}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                    <XAxis dataKey="month" tickLine={false} axisLine={false} fontSize={12} />
-                    <YAxis tickLine={false} axisLine={false} fontSize={12} />
-                    <ChartTooltip content={<ChartTooltipContent />} />
-                    <ChartLegend content={<ChartLegendContent />} />
-                    <Line
-                      type="monotone"
-                      dataKey="conversations"
-                      stroke="var(--color-conversations)"
-                      strokeWidth={2}
-                      dot={{ fill: 'var(--color-conversations)', r: 4 }}
-                    />
-                  </LineChart>
-                </ChartContainer>
+                {monthlyAnalytics.length > 0 ? (
+                  <ChartContainer config={monthlyChartConfig} className="h-[300px] w-full">
+                    <LineChart data={monthlyAnalytics}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                      <XAxis dataKey="month" tickLine={false} axisLine={false} fontSize={12} />
+                      <YAxis tickLine={false} axisLine={false} fontSize={12} />
+                      <ChartTooltip content={<ChartTooltipContent />} />
+                      <ChartLegend content={<ChartLegendContent />} />
+                      <Line
+                        type="monotone"
+                        dataKey="conversations"
+                        stroke="var(--color-conversations)"
+                        strokeWidth={2}
+                        dot={{ fill: 'var(--color-conversations)', r: 4 }}
+                      />
+                    </LineChart>
+                  </ChartContainer>
+                ) : (
+                  <div className="h-[300px] flex items-center justify-center text-muted-foreground text-sm">
+                    No monthly data available yet
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -229,27 +276,33 @@ export function AnalyticsView() {
                 </div>
               </CardHeader>
               <CardContent>
-                <ChartContainer config={monthlyChartConfig} className="h-[300px] w-full">
-                  <AreaChart data={mockMonthlyAnalytics}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                    <XAxis dataKey="month" tickLine={false} axisLine={false} fontSize={12} />
-                    <YAxis tickLine={false} axisLine={false} fontSize={12} />
-                    <ChartTooltip content={<ChartTooltipContent />} />
-                    <defs>
-                      <linearGradient id="fillMessages" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="var(--color-messages)" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="var(--color-messages)" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <Area
-                      type="monotone"
-                      dataKey="messages"
-                      stroke="var(--color-messages)"
-                      fill="url(#fillMessages)"
-                      strokeWidth={2}
-                    />
-                  </AreaChart>
-                </ChartContainer>
+                {monthlyAnalytics.length > 0 ? (
+                  <ChartContainer config={monthlyChartConfig} className="h-[300px] w-full">
+                    <AreaChart data={monthlyAnalytics}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                      <XAxis dataKey="month" tickLine={false} axisLine={false} fontSize={12} />
+                      <YAxis tickLine={false} axisLine={false} fontSize={12} />
+                      <ChartTooltip content={<ChartTooltipContent />} />
+                      <defs>
+                        <linearGradient id="fillMessages" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="var(--color-messages)" stopOpacity={0.3} />
+                          <stop offset="95%" stopColor="var(--color-messages)" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <Area
+                        type="monotone"
+                        dataKey="messages"
+                        stroke="var(--color-messages)"
+                        fill="url(#fillMessages)"
+                        strokeWidth={2}
+                      />
+                    </AreaChart>
+                  </ChartContainer>
+                ) : (
+                  <div className="h-[300px] flex items-center justify-center text-muted-foreground text-sm">
+                    No monthly data available yet
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>

@@ -22,6 +22,55 @@ export interface AgentLayer {
   icon: string;
 }
 
+export interface EcosystemStats {
+  whatsappGroups: number;
+  telegramChannels: number;
+  osintSources: number;
+  totalGroups: number;
+  telegramMembers: string;
+}
+
+// Signals computed from DB
+export interface ActiveSignal {
+  icon: string;
+  label: string;
+  value: string;
+  trend: string;
+  color: string;
+}
+
+export interface ConfidenceIndicator {
+  label: string;
+  value: number;
+}
+
+export interface PredictionChartData {
+  hour: string;
+  activity: number;
+  confidence: number;
+}
+
+export interface TimelineEntry {
+  date: string;
+  event: string;
+  type: string;
+}
+
+export interface CurrentAdaptiveMetrics {
+  falsePositiveRate: number;
+  accuracy: number;
+  sensitivity: number;
+  iterations: number;
+}
+
+export interface StrategySignals {
+  activeSignals: ActiveSignal[];
+  confidenceIndicators: ConfidenceIndicator[];
+  predictionChartData: PredictionChartData[];
+  timelineEntries: TimelineEntry[];
+  currentMetrics: CurrentAdaptiveMetrics;
+}
+
 interface WhatomateStore {
   // Agents — hydrated from /api/agents
   agentLayers: AgentLayer[];
@@ -65,6 +114,14 @@ interface WhatomateStore {
   addReport: (report: Report) => void;
   generatingReport: boolean;
   setGeneratingReport: (val: boolean) => void;
+
+  // Ecosystem stats — computed from /api/agents
+  ecosystem: EcosystemStats;
+  setEcosystem: (stats: EcosystemStats) => void;
+
+  // Signals — hydrated from /api/strategies/signals
+  signals: StrategySignals;
+  setSignals: (signals: StrategySignals) => void;
 
   // Monitoring
   threatLevel: number;
@@ -167,6 +224,20 @@ export const useWhatomateStore = create<WhatomateStore>((set) => ({
     set((state) => ({ reports: [report, ...state.reports] })),
   generatingReport: false,
   setGeneratingReport: (val) => set({ generatingReport: val }),
+
+  // Ecosystem stats
+  ecosystem: { whatsappGroups: 0, telegramChannels: 0, osintSources: 0, totalGroups: 0, telegramMembers: '0' },
+  setEcosystem: (stats) => set({ ecosystem: stats }),
+
+  // Signals — start with empty defaults, hydrate from API
+  signals: {
+    activeSignals: [],
+    confidenceIndicators: [],
+    predictionChartData: [],
+    timelineEntries: [],
+    currentMetrics: { falsePositiveRate: 0, accuracy: 0, sensitivity: 0, iterations: 0 },
+  },
+  setSignals: (signals) => set({ signals }),
 
   // Monitoring
   threatLevel: 0,

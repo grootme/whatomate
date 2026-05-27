@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -18,18 +18,56 @@ import {
   Clock,
   Filter,
   MessageSquare,
+  Loader2,
 } from 'lucide-react';
-import { mockConversations, mockMessages } from '@/lib/mock-data';
+
+interface Conversation {
+  id: string;
+  contactId: string;
+  contactName: string;
+  lastMessage: string;
+  lastMessageTime: string;
+  unreadCount: number;
+  status: 'active' | 'resolved' | 'pending';
+  assignedTo?: string;
+}
+
+interface Message {
+  id: string;
+  conversationId: string;
+  from: string;
+  text: string;
+  timestamp: string;
+  type: 'incoming' | 'outgoing';
+  status?: 'sent' | 'delivered' | 'read';
+}
 
 export function ChatView() {
-  const [selectedConv, setSelectedConv] = useState(mockConversations[0]?.id || '');
+  const [selectedConv, setSelectedConv] = useState('');
   const [messageInput, setMessageInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [messagesMap, setMessagesMap] = useState<Record<string, Message[]>>({});
+  const [loading, setLoading] = useState(true);
 
-  const currentMessages = mockMessages[selectedConv] || [];
-  const currentConv = mockConversations.find(c => c.id === selectedConv);
+  useEffect(() => {
+    fetch('/api/hermes/conversations')
+      .then((res) => res.json())
+      .then((data) => {
+        setConversations(data.conversations || []);
+        setMessagesMap(data.messages || {});
+        if (data.conversations?.length > 0 && !selectedConv) {
+          setSelectedConv(data.conversations[0].id);
+        }
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, [selectedConv]);
 
-  const filteredConversations = mockConversations.filter(
+  const currentMessages = messagesMap[selectedConv] || [];
+  const currentConv = conversations.find(c => c.id === selectedConv);
+
+  const filteredConversations = conversations.filter(
     conv =>
       conv.contactName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       conv.lastMessage.toLowerCase().includes(searchQuery.toLowerCase())
@@ -47,6 +85,14 @@ export function ChatView() {
         return <Clock className="w-3.5 h-3.5 text-muted-foreground" />;
     }
   };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-[calc(100vh-8rem)]">
+        <Loader2 className="w-8 h-8 animate-spin text-[#25D366]" />
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-[calc(100vh-8rem)] gap-0 border rounded-xl overflow-hidden bg-white shadow-sm">
@@ -75,41 +121,47 @@ export function ChatView() {
 
         {/* Conversation Items */}
         <ScrollArea className="flex-1">
-          <div className="divide-y">
-            {filteredConversations.map((conv) => (
-              <button
-                key={conv.id}
-                onClick={() => setSelectedConv(conv.id)}
-                className={`w-full flex items-center gap-3 p-3 hover:bg-muted/50 transition-colors text-left ${
-                  selectedConv === conv.id ? 'bg-[#25D366]/5 border-r-2 border-r-[#25D366]' : ''
-                }`}
-              >
-                <Avatar className="h-12 w-12 shrink-0">
-                  <AvatarFallback className="bg-[#25D366]/10 text-[#25D366] font-semibold">
-                    {conv.contactName.split(' ').map(n => n[0]).join('')}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between">
-                    <p className="font-medium text-sm truncate">{conv.contactName}</p>
-                    <span className="text-[11px] text-muted-foreground whitespace-nowrap ml-2">
-                      {conv.lastMessageTime}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between mt-0.5">
-                    <p className="text-xs text-muted-foreground truncate pr-2">
-                      {conv.lastMessage}
-                    </p>
-                    {conv.unreadCount > 0 && (
-                      <span className="bg-[#25D366] text-white text-[10px] font-bold min-w-[20px] h-5 flex items-center justify-center rounded-full px-1">
-                        {conv.unreadCount}
+          {filteredConversations.length > 0 ? (
+            <div className="divide-y">
+              {filteredConversations.map((conv) => (
+                <button
+                  key={conv.id}
+                  onClick={() => setSelectedConv(conv.id)}
+                  className={`w-full flex items-center gap-3 p-3 hover:bg-muted/50 transition-colors text-left ${
+                    selectedConv === conv.id ? 'bg-[#25D366]/5 border-r-2 border-r-[#25D366]' : ''
+                  }`}
+                >
+                  <Avatar className="h-12 w-12 shrink-0">
+                    <AvatarFallback className="bg-[#25D366]/10 text-[#25D366] font-semibold">
+                      {conv.contactName.split(' ').map(n => n[0]).join('')}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <p className="font-medium text-sm truncate">{conv.contactName}</p>
+                      <span className="text-[11px] text-muted-foreground whitespace-nowrap ml-2">
+                        {conv.lastMessageTime}
                       </span>
-                    )}
+                    </div>
+                    <div className="flex items-center justify-between mt-0.5">
+                      <p className="text-xs text-muted-foreground truncate pr-2">
+                        {conv.lastMessage}
+                      </p>
+                      {conv.unreadCount > 0 && (
+                        <span className="bg-[#25D366] text-white text-[10px] font-bold min-w-[20px] h-5 flex items-center justify-center rounded-full px-1">
+                          {conv.unreadCount}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                </div>
-              </button>
-            ))}
-          </div>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="p-8 text-center text-muted-foreground text-sm">
+              No conversations yet. Connect Hermes to start chatting.
+            </div>
+          )}
         </ScrollArea>
       </div>
 
@@ -152,26 +204,32 @@ export function ChatView() {
             {/* Messages */}
             <ScrollArea className="flex-1 p-4">
               <div className="max-w-2xl mx-auto space-y-2">
-                {currentMessages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className={`flex ${msg.type === 'outgoing' ? 'justify-end' : 'justify-start'}`}
-                  >
+                {currentMessages.length > 0 ? (
+                  currentMessages.map((msg) => (
                     <div
-                      className={`relative max-w-[75%] px-3 py-2 rounded-lg shadow-sm ${
-                        msg.type === 'outgoing'
-                          ? 'bg-[#DCF8C6] rounded-tr-none'
-                          : 'bg-white rounded-tl-none'
-                      }`}
+                      key={msg.id}
+                      className={`flex ${msg.type === 'outgoing' ? 'justify-end' : 'justify-start'}`}
                     >
-                      <p className="text-sm leading-relaxed">{msg.text}</p>
-                      <div className={`flex items-center gap-1 mt-1 ${msg.type === 'outgoing' ? 'justify-end' : ''}`}>
-                        <span className="text-[10px] text-gray-500">{msg.timestamp}</span>
-                        {msg.type === 'outgoing' && getStatusIcon(msg.status)}
+                      <div
+                        className={`relative max-w-[75%] px-3 py-2 rounded-lg shadow-sm ${
+                          msg.type === 'outgoing'
+                            ? 'bg-[#DCF8C6] rounded-tr-none'
+                            : 'bg-white rounded-tl-none'
+                        }`}
+                      >
+                        <p className="text-sm leading-relaxed">{msg.text}</p>
+                        <div className={`flex items-center gap-1 mt-1 ${msg.type === 'outgoing' ? 'justify-end' : ''}`}>
+                          <span className="text-[10px] text-gray-500">{msg.timestamp}</span>
+                          {msg.type === 'outgoing' && getStatusIcon(msg.status)}
+                        </div>
                       </div>
                     </div>
+                  ))
+                ) : (
+                  <div className="text-center text-muted-foreground text-sm py-8">
+                    No messages in this conversation yet
                   </div>
-                ))}
+                )}
               </div>
             </ScrollArea>
 

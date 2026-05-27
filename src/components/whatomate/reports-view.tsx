@@ -51,30 +51,74 @@ export function ReportsView() {
   const filteredReports = reports.filter((r) => filterType === 'all' || r.type === filterType);
   const selectedReportData = reports.find((r) => r.id === selectedReport);
 
-  const handleGenerateReport = (type: ReportType) => {
+  const handleGenerateReport = async (type: ReportType) => {
     setGeneratingReport(true);
     const template = templates.find((t) => t.type === type);
-    const now = new Date();
-    const typeLabels = { diario: 'Diario', semanal: 'Semanal', mensual: 'Mensual' };
-    
-    setTimeout(() => {
-      const newReport = {
-        id: `rep-${Date.now()}`,
-        title: `Reporte ${typeLabels[type]} - ${now.getDate()} ${now.toLocaleString('es', { month: 'long' })} ${now.getFullYear()}`,
-        dateFrom: now.toISOString(),
-        dateTo: now.toISOString(),
-        type,
-        status: 'completado' as ReportStatus,
-        pages: type === 'diario' ? 11 : type === 'semanal' ? 26 : 42,
-        sections: template?.sections || [],
-        alertCount: 0,
-        eventCount: 0,
-        entityCount: 0,
-        downloadUrl: `/download/reporte-${type}-${Date.now()}.pdf`,
-      };
-      addReport(newReport);
+
+    try {
+      const res = await fetch('/api/reports', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type,
+          sections: template?.sections || [],
+        }),
+      });
+
+      if (res.ok) {
+        const report = await res.json();
+        addReport({
+          id: report.id,
+          title: report.title,
+          type: report.type as ReportType,
+          status: report.status as ReportStatus,
+          pages: report.pages || 0,
+          sections: template?.sections || [],
+          dateFrom: report.dateFrom,
+          dateTo: report.dateTo,
+          alertCount: report.alertCount || 0,
+          eventCount: report.eventCount || 0,
+          entityCount: report.entityCount || 0,
+          downloadUrl: report.downloadUrl,
+        });
+
+        // Refresh reports from API to get updated status
+        setTimeout(async () => {
+          const refreshRes = await fetch('/api/reports');
+          if (refreshRes.ok) {
+            const data = await refreshRes.json();
+            const refreshedReports = (data.reports ?? []).map(
+              (r: Record<string, unknown>) => {
+                let sections: string[] = [];
+                if (Array.isArray(r.sections)) sections = r.sections as string[];
+                else if (typeof r.sections === 'string') {
+                  try { sections = JSON.parse(r.sections as string); } catch { sections = []; }
+                }
+                return {
+                  id: r.id as string,
+                  title: (r.title as string) || '',
+                  type: r.type as ReportType,
+                  status: r.status as ReportStatus,
+                  pages: (r.pages as number) || 0,
+                  sections,
+                  dateFrom: r.dateFrom as string,
+                  dateTo: r.dateTo as string,
+                  alertCount: (r.alertCount as number) || 0,
+                  eventCount: (r.eventCount as number) || 0,
+                  entityCount: (r.entityCount as number) || 0,
+                  downloadUrl: r.downloadUrl as string | undefined,
+                };
+              }
+            );
+            useWhatomateStore.getState().setReports(refreshedReports);
+          }
+        }, 5000);
+      }
+    } catch (err) {
+      console.error('Report generation failed:', err);
+    } finally {
       setGeneratingReport(false);
-    }, 3000);
+    }
   };
 
   return (
@@ -370,7 +414,7 @@ export function ReportsView() {
                             {idx + 1}
                           </div>
                           <span className="text-xs">{section}</span>
-                          <Progress value={Math.random() * 40 + 60} className="h-1 flex-1 ml-2" />
+                          <Progress value={85 + (idx * 3) % 15} className="h-1 flex-1 ml-2" />
                         </div>
                       ))}
                     </div>

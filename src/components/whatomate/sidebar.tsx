@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { cn } from '@/lib/utils';
-import { navItems } from '@/lib/mock-data';
+import { navItems } from '@/lib/nav-config';
 import {
   LayoutDashboard,
   MessageSquare,

@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { safeEventAppend } from '@/lib/intelligence/safe-event';
 import { fetchService } from '@/lib/intelligence/service-client';
+import { strategyRegistry } from '@/lib/intelligence/strategies';
+import { buildStrategyContext } from '@/lib/intelligence/context-builder';
 
 export async function GET() {
   // Get alerts from database
@@ -60,6 +63,36 @@ export async function POST(request: Request) {
     },
   });
 
+  // Create IntelligenceEvent for alert creation
+  await db.intelligenceEvent.create({
+    data: {
+      eventType: 'monitoring.alert_generated',
+      aggregateId: alert.id,
+      aggregateType: 'alert',
+      stream: 'whatomate:alerts',
+      payload: JSON.stringify({
+        source: alert.source,
+        severity: alert.severity,
+        title: alert.title,
+        strategy: alert.strategy,
+      }),
+      metadata: JSON.stringify({ alertCreated: true }),
+      processed: false,
+    },
+  });
+
+  safeEventAppend('whatomate:alerts', {
+    eventType: 'monitoring.alert_generated',
+    aggregateId: alert.id,
+    aggregateType: 'alert',
+    payload: {
+      source: alert.source,
+      severity: alert.severity,
+      title: alert.title,
+      strategy: alert.strategy,
+    },
+  });
+
   return NextResponse.json(alert, { status: 201 });
 }
 
@@ -81,6 +114,145 @@ export async function PATCH(request: Request) {
       escalated: body.escalated,
     },
   });
+
+  const eventIds: string[] = [];
+
+  // ===== When acknowledging: create IntelligenceEvent =====
+  if (body.acknowledged) {
+    const ackEventId = `ack_${alertId}_${Date.now()}`;
+
+    safeEventAppend('whatomate:alerts', {
+      eventType: 'monitoring.alert_acknowledged',
+      aggregateId: alertId,
+      aggregateType: 'alert',
+      payload: {
+        alertId,
+        severity: alert.severity,
+        title: alert.title,
+        acknowledgedBy: body.acknowledgedBy,
+        strategy: alert.strategy,
+      },
+    });
+
+    const dbEvent = await db.intelligenceEvent.create({
+      data: {
+        eventType: 'monitoring.alert_acknowledged',
+        aggregateId: alertId,
+        aggregateType: 'alert',
+        stream: 'whatomate:alerts',
+        payload: JSON.stringify({
+          alertId,
+          severity: alert.severity,
+          title: alert.title,
+          acknowledgedBy: body.acknowledgedBy,
+          strategy: alert.strategy,
+        }),
+        metadata: JSON.stringify({ acknowledgedBy: body.acknowledgedBy }),
+        processed: false,
+      },
+    });
+
+    eventIds.push(dbEvent.id);
+  }
+
+  // ===== When escalating: create IntelligenceEvent AND run consensus strategy =====
+  if (body.escalated) {
+    const escEventId = `esc_${alertId}_${Date.now()}`;
+
+    safeEventAppend('whatomate:alerts', {
+      eventType: 'monitoring.alert_escalated',
+      aggregateId: alertId,
+      aggregateType: 'alert',
+      payload: {
+        alertId,
+        severity: alert.severity,
+        title: alert.title,
+        strategy: alert.strategy,
+        escalatedBy: body.acknowledgedBy,
+      },
+    });
+
+    const dbEvent = await db.intelligenceEvent.create({
+      data: {
+        eventType: 'monitoring.alert_escalated',
+        aggregateId: alertId,
+        aggregateType: 'alert',
+        stream: 'whatomate:alerts',
+        payload: JSON.stringify({
+          alertId,
+          severity: alert.severity,
+          title: alert.title,
+          strategy: alert.strategy,
+          escalatedBy: body.acknowledgedBy,
+        }),
+        metadata: JSON.stringify({ escalated: true, escalatedBy: body.acknowledgedBy }),
+        processed: false,
+      },
+    });
+
+    eventIds.push(dbEvent.id);
+
+    // Run the consensus strategy to get multi-agent opinion on this escalated alert
+    try {
+      const context = await buildStrategyContext();
+      const consensusResult = await strategyRegistry.evaluateWith('consensus', context);
+
+      // Create IntelligenceEvent for consensus result
+      const consensusEvent = await db.intelligenceEvent.create({
+        data: {
+          eventType: 'consensus.decision_made',
+          aggregateId: alertId,
+          aggregateType: 'alert',
+          stream: 'whatomate:decisions',
+          payload: JSON.stringify({
+            alertId,
+            consensusAction: consensusResult.action,
+            consensusSeverity: consensusResult.severity,
+            consensusConfidence: consensusResult.confidence,
+            consensusReasoning: consensusResult.reasoning,
+            triggeredBy: 'escalation',
+          }),
+          metadata: JSON.stringify({ strategyId: 'consensus', triggeredByEscalation: true, alertId }),
+          processed: false,
+        },
+      });
+
+      eventIds.push(consensusEvent.id);
+
+      safeEventAppend('whatomate:decisions', {
+        eventType: 'consensus.decision_made',
+        aggregateId: alertId,
+        aggregateType: 'alert',
+        payload: {
+          alertId,
+          consensusAction: consensusResult.action,
+          consensusSeverity: consensusResult.severity,
+          consensusConfidence: consensusResult.confidence,
+          consensusReasoning: consensusResult.reasoning,
+          triggeredBy: 'escalation',
+        },
+      });
+    } catch (err) {
+      console.error('[Alerts] Consensus strategy evaluation on escalation failed:', err);
+    }
+  }
+
+  // Update the alert's relatedEvents field with the event IDs
+  if (eventIds.length > 0) {
+    const existingRelated = alert.relatedEvents ? JSON.parse(alert.relatedEvents) : [];
+    const updatedRelated = [...new Set([...existingRelated, ...eventIds])];
+
+    await db.alert.update({
+      where: { id: alertId },
+      data: {
+        relatedEvents: JSON.stringify(updatedRelated),
+      },
+    });
+
+    // Return updated alert with relatedEvents
+    const updatedAlert = await db.alert.findUnique({ where: { id: alertId } });
+    return NextResponse.json(updatedAlert || alert);
+  }
 
   return NextResponse.json(alert);
 }

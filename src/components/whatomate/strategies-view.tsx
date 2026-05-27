@@ -116,7 +116,7 @@ function RiskGauge({ score }: { score: number }) {
 }
 
 function ConsensusVotingPanel() {
-  const { consensusVotes, updateVote } = useWhatomateStore();
+  const { consensusVotes, updateVote, setConsensusVotes } = useWhatomateStore();
   const [isVoting, setIsVoting] = useState(false);
   const [animatingAgent, setAnimatingAgent] = useState<string | null>(null);
 
@@ -133,20 +133,44 @@ function ConsensusVotingPanel() {
 
   const consensus = getConsensusLevel();
 
-  const simulateVoting = useCallback(() => {
+  const simulateVoting = useCallback(async () => {
     setIsVoting(true);
-    const votes: Array<'favor' | 'contra' | 'abstencion'> = ['favor', 'favor', 'favor', 'contra'];
-    consensusVotes.forEach((_, idx) => {
-      setTimeout(() => {
-        setAnimatingAgent(consensusVotes[idx].agentId);
-        updateVote(consensusVotes[idx].agentId, votes[idx]);
-        setTimeout(() => setAnimatingAgent(null), 500);
-        if (idx === consensusVotes.length - 1) {
+    try {
+      const res = await fetch('/api/strategies', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'consensus' }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        // The API returns the votes array from the real consensus strategy evaluation
+        const returnedVotes: Array<{ id: string; alertId: string; agentId: string; agentName: string; vote: 'favor' | 'contra' | 'abstencion'; confidence: number; reasoning: string }> = data.votes ?? [];
+
+        // Animate each vote sequentially
+        returnedVotes.forEach((v, idx) => {
+          setTimeout(() => {
+            setAnimatingAgent(v.agentId);
+            updateVote(v.agentId, v.vote);
+            setTimeout(() => setAnimatingAgent(null), 500);
+            if (idx === returnedVotes.length - 1) {
+              // After last animation, replace all votes with full data from API
+              setConsensusVotes(returnedVotes);
+              setIsVoting(false);
+            }
+          }, idx * 800);
+        });
+
+        // If no votes returned, just finish
+        if (returnedVotes.length === 0) {
           setIsVoting(false);
         }
-      }, idx * 800);
-    });
-  }, [consensusVotes, updateVote]);
+      } else {
+        setIsVoting(false);
+      }
+    } catch {
+      setIsVoting(false);
+    }
+  }, [updateVote, setConsensusVotes]);
 
   return (
     <div className="space-y-6">
@@ -268,23 +292,12 @@ export function StrategiesView() {
     learningRate,
     setLearningRate,
     patterns,
+    signals,
   } = useWhatomateStore();
   useIntelligenceData();
 
-  const predictionData = [
-    { hour: '00:00', activity: 45, confidence: 92 },
-    { hour: '02:00', activity: 28, confidence: 88 },
-    { hour: '04:00', activity: 15, confidence: 85 },
-    { hour: '06:00', activity: 52, confidence: 90 },
-    { hour: '08:00', activity: 78, confidence: 94 },
-    { hour: '10:00', activity: 95, confidence: 91 },
-    { hour: '12:00', activity: 110, confidence: 87 },
-    { hour: '14:00', activity: 125, confidence: 83 },
-    { hour: '16:00', activity: 115, confidence: 89 },
-    { hour: '18:00', activity: 98, confidence: 93 },
-    { hour: '20:00', activity: 82, confidence: 90 },
-    { hour: '22:00', activity: 58, confidence: 86 },
-  ];
+  // Use real prediction data from DB (fetched via /api/strategies/signals)
+  const predictionData = signals.predictionChartData;
 
   const [activeTab, setActiveTab] = useState('umbrales');
 
@@ -621,20 +634,21 @@ export function StrategiesView() {
                     <CardContent className="p-4">
                       <h4 className="text-sm font-semibold mb-3">Señales Activas</h4>
                       <div className="space-y-2">
-                        {[
-                          { icon: Shield, label: 'Probabilidad evento OSINT', value: '67%', trend: 'up', color: 'text-amber-600' },
-                          { icon: BarChart3, label: 'Tendencia cripto BTC', value: 'Alcista', trend: 'up', color: 'text-emerald-600' },
-                          { icon: Zap, label: 'Pico actividad Telegram', value: '14:00-16:00', trend: 'neutral', color: 'text-teal-600' },
-                          { icon: AlertTriangle, label: 'Riesgo desinformación', value: 'Alto', trend: 'up', color: 'text-red-600' },
-                          { icon: Brain, label: 'Patrón emergente', value: 'Lavado divisas', trend: 'up', color: 'text-orange-600' },
-                        ].map((signal, idx) => (
-                          <div key={idx} className="flex items-center gap-3 p-2 rounded-lg bg-muted/40">
-                            <signal.icon className={cn('w-4 h-4', signal.color)} />
-                            <span className="text-xs flex-1">{signal.label}</span>
-                            <span className={cn('text-xs font-bold', signal.color)}>{signal.value}</span>
-                            <TrendingUp className={cn('w-3 h-3', signal.trend === 'up' ? 'text-emerald-500' : 'text-muted-foreground')} />
-                          </div>
-                        ))}
+                        {signals.activeSignals.map((signal, idx) => {
+                          const IconComponent = signal.icon === 'Shield' ? Shield :
+                            signal.icon === 'BarChart3' ? BarChart3 :
+                            signal.icon === 'Zap' ? Zap :
+                            signal.icon === 'AlertTriangle' ? AlertTriangle :
+                            Brain;
+                          return (
+                            <div key={idx} className="flex items-center gap-3 p-2 rounded-lg bg-muted/40">
+                              <IconComponent className={cn('w-4 h-4', signal.color)} />
+                              <span className="text-xs flex-1">{signal.label}</span>
+                              <span className={cn('text-xs font-bold', signal.color)}>{signal.value}</span>
+                              <TrendingUp className={cn('w-3 h-3', signal.trend === 'up' ? 'text-emerald-500' : 'text-muted-foreground')} />
+                            </div>
+                          );
+                        })}
                       </div>
                     </CardContent>
                   </Card>
@@ -642,12 +656,7 @@ export function StrategiesView() {
                     <CardContent className="p-4">
                       <h4 className="text-sm font-semibold mb-3">Indicadores de Confianza</h4>
                       <div className="space-y-3">
-                        {[
-                          { label: 'Modelo de predicción', value: 87 },
-                          { label: 'Datos históricos', value: 92 },
-                          { label: 'Correlación OSINT', value: 73 },
-                          { label: 'Consenso agentes', value: 81 },
-                        ].map((ind) => (
+                        {signals.confidenceIndicators.map((ind) => (
                           <div key={ind.label}>
                             <div className="flex items-center justify-between text-xs mb-1">
                               <span>{ind.label}</span>
@@ -728,19 +737,19 @@ export function StrategiesView() {
                           <div className="grid grid-cols-2 gap-2 text-xs">
                             <div>
                               <span className="text-muted-foreground">Falsos Positivos:</span>
-                              <span className="font-bold text-emerald-600 ml-1">2.5%</span>
+                              <span className="font-bold text-emerald-600 ml-1">{signals.currentMetrics.falsePositiveRate.toFixed(1)}%</span>
                             </div>
                             <div>
                               <span className="text-muted-foreground">Precisión:</span>
-                              <span className="font-bold text-emerald-600 ml-1">96%</span>
+                              <span className="font-bold text-emerald-600 ml-1">{Math.round(signals.currentMetrics.accuracy)}%</span>
                             </div>
                             <div>
                               <span className="text-muted-foreground">Sensibilidad:</span>
-                              <span className="font-bold text-emerald-600 ml-1">95%</span>
+                              <span className="font-bold text-emerald-600 ml-1">{Math.round(signals.currentMetrics.sensitivity)}%</span>
                             </div>
                             <div>
                               <span className="text-muted-foreground">Iteraciones:</span>
-                              <span className="font-bold text-emerald-600 ml-1">1,247</span>
+                              <span className="font-bold text-emerald-600 ml-1">{signals.currentMetrics.iterations.toLocaleString()}</span>
                             </div>
                           </div>
                         </div>
@@ -751,14 +760,7 @@ export function StrategiesView() {
                     <CardContent className="p-4">
                       <h4 className="text-sm font-semibold mb-3">Línea de Tiempo de Evolución</h4>
                       <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar">
-                        {[
-                          { date: 'May 26', event: 'Ajuste automático umbral fraude: 3→4/hora', type: 'auto' },
-                          { date: 'May 25', event: 'Nuevo patrón detectado: estafa NFT', type: 'learn' },
-                          { date: 'May 24', event: 'Reducción falsos positivos: 3.1%→2.8%', type: 'improve' },
-                          { date: 'May 23', event: 'Actualización modelo NLP v2.3', type: 'update' },
-                          { date: 'May 22', event: 'Nuevo patrón: phishing coordinado', type: 'learn' },
-                          { date: 'May 21', event: 'Ajuste peso dimensión Conexiones: 18%→20%', type: 'auto' },
-                        ].map((entry, idx) => (
+                        {signals.timelineEntries.map((entry, idx) => (
                           <div key={idx} className="flex items-start gap-2 text-xs">
                             <div className={cn(
                               'w-5 h-5 rounded-full flex items-center justify-center shrink-0 mt-0.5',

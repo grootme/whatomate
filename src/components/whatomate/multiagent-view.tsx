@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
@@ -108,56 +108,18 @@ function DataFlowArrow() {
 }
 
 export function MultiagentView() {
-  const { agentLayers, eventBus, updateAgentHealth, addEvent, threatLevel, alerts } = useWhatomateStore();
+  const { agentLayers, eventBus, ecosystem, threatLevel } = useWhatomateStore();
   useIntelligenceData();
 
-  // Compute ecosystem stats from real store data
+  // Compute ecosystem stats from real store data (populated by /api/agents)
   const stats = {
-    monitoredGroups: agentLayers.reduce((sum, l) => sum + l.agents.length * 23, 0) || 276,
-    telegramMembers: '16.3M+',
-    whatsappGroups: agentLayers.find(l => l.id === 1)?.agents.find(a => a.id === 'ing-wa') ? 195 : 0,
-    osintSources: agentLayers.find(l => l.id === 1)?.agents.find(a => a.id === 'ing-os') ? 6 : 0,
-    intelligenceTools: agentLayers.reduce((sum, l) => sum + l.agents.length, 0) || 19,
+    monitoredGroups: ecosystem.totalGroups,
+    telegramMembers: ecosystem.telegramMembers,
+    whatsappGroups: ecosystem.whatsappGroups,
+    osintSources: ecosystem.osintSources,
+    intelligenceTools: agentLayers.reduce((sum, l) => sum + l.agents.length, 0),
     threatLevel: threatLevel >= 80 ? 'CRÍTICO' : threatLevel >= 60 ? 'ALTO' : threatLevel >= 40 ? 'MEDIO' : 'BAJO',
   };
-
-  // Simulate real-time health fluctuations
-  useEffect(() => {
-    const interval = setInterval(() => {
-      agentLayers.forEach((layer) => {
-        layer.agents.forEach((agent) => {
-          if (agent.status === 'active') {
-            const fluctuation = Math.random() * 4 - 2;
-            const newHealth = Math.min(100, Math.max(70, agent.health + fluctuation));
-            updateAgentHealth(agent.id, Math.round(newHealth));
-          }
-        });
-      });
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [agentLayers, updateAgentHealth]);
-
-  // Simulate event bus traffic
-  useEffect(() => {
-    const sources = ['WhatsApp Bridge', 'Telethon', 'OSINT Shadowbroker', 'Pattern Detector', 'Risk Scorer'];
-    const targets = ['Semantic Analyzer', 'Threshold Monitor', 'Alert Engine', 'Report Generator', 'Cross-Platform Correlator'];
-    const types = ['message_batch', 'channel_update', 'osint_alert', 'pattern_match', 'risk_score', 'threshold_breach'];
-    const dataSamples = ['150 mensajes batch', '3 canales actualizados', 'Alerta sísmica M5.2', 'Patrón fraude detectado', 'Score 87/100', 'Umbral superado: 5/hora'];
-
-    const interval = setInterval(() => {
-      const now = new Date();
-      const event = {
-        id: `evt-${Date.now()}`,
-        source: sources[Math.floor(Math.random() * sources.length)],
-        target: targets[Math.floor(Math.random() * targets.length)],
-        type: types[Math.floor(Math.random() * types.length)],
-        timestamp: `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`,
-        data: dataSamples[Math.floor(Math.random() * dataSamples.length)],
-      };
-      addEvent(event);
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [addEvent]);
 
   const totalAgents = agentLayers.reduce((sum, l) => sum + l.agents.length, 0);
   const activeAgents = agentLayers.reduce((sum, l) => sum + l.agents.filter((a) => a.status === 'active').length, 0);
@@ -175,7 +137,7 @@ export function MultiagentView() {
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         {[
           { label: 'Grupos/Canales', value: stats.monitoredGroups, icon: Users, color: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30' },
-          { label: 'Miembros Telegram', value: '16.3M+', icon: MessageSquare, color: 'text-teal-600 bg-teal-50 dark:bg-teal-950/30' },
+          { label: 'Miembros Telegram', value: stats.telegramMembers, icon: MessageSquare, color: 'text-teal-600 bg-teal-50 dark:bg-teal-950/30' },
           { label: 'Grupos WhatsApp', value: stats.whatsappGroups, icon: Radio, color: 'text-green-600 bg-green-50 dark:bg-green-950/30' },
           { label: 'Fuentes OSINT', value: stats.osintSources, icon: Globe, color: 'text-amber-600 bg-amber-50 dark:bg-amber-950/30' },
           { label: 'Herramientas Intel.', value: stats.intelligenceTools, icon: Cpu, color: 'text-orange-600 bg-orange-50 dark:bg-orange-950/30' },

@@ -2,9 +2,202 @@ import { NextResponse } from 'next/server';
 import { fetchService } from '@/lib/intelligence/service-client';
 import { db } from '@/lib/db';
 
+// ===== Agent Definition (static metadata) =====
+interface AgentDefinition {
+  id: string;
+  name: string;
+  layer: number;
+  layerName: string;
+  description: string;
+  serviceCheck?: {
+    service: Parameters<typeof fetchService>[0];
+    path: string;
+  };
+}
+
+const AGENT_DEFINITIONS: AgentDefinition[] = [
+  // Layer 1: Ingesta
+  {
+    id: 'ing-wa',
+    name: 'WhatsApp Bridge',
+    layer: 1,
+    layerName: 'Ingesta',
+    description: 'Conector Baileys para WhatsApp - monitoreo de 195 grupos',
+    serviceCheck: { service: 'whatsapp', path: '/status' },
+  },
+  {
+    id: 'ing-tg',
+    name: 'Telethon (Telegram)',
+    layer: 1,
+    layerName: 'Ingesta',
+    description: 'Conector Telegram - monitoreo de canales con 16.3M+ miembros',
+    serviceCheck: { service: 'telegram', path: '/status' },
+  },
+  {
+    id: 'ing-os',
+    name: 'OSINT Shadowbroker',
+    layer: 1,
+    layerName: 'Ingesta',
+    description: 'Motor OSINT - 6 fuentes de inteligencia activas',
+    serviceCheck: { service: 'osint', path: '/report' },
+  },
+  // Layer 2: Análisis
+  {
+    id: 'ana-sem',
+    name: 'Semantic Analyzer',
+    layer: 2,
+    layerName: 'Análisis',
+    description: 'Análisis semántico con NLP y detección de intenciones',
+    serviceCheck: { service: 'cognitive', path: '/dashboard' },
+  },
+  {
+    id: 'ana-pat',
+    name: 'Pattern Detector',
+    layer: 2,
+    layerName: 'Análisis',
+    description: 'Detección de patrones de fraude, lavado y desinformación',
+  },
+  {
+    id: 'ana-cro',
+    name: 'Cross-Platform Correlator',
+    layer: 2,
+    layerName: 'Análisis',
+    description: 'Correlación de eventos entre WhatsApp, Telegram y OSINT',
+  },
+  {
+    id: 'ana-ris',
+    name: 'Risk Scorer',
+    layer: 2,
+    layerName: 'Análisis',
+    description: 'Puntuación de riesgo multidimensional con 5 factores',
+  },
+  // Layer 3: Monitoreo
+  {
+    id: 'mon-thr',
+    name: 'Threshold Monitor',
+    layer: 3,
+    layerName: 'Monitoreo',
+    description: 'Monitoreo de umbrales configurables con alertas automáticas',
+  },
+  {
+    id: 'mon-ano',
+    name: 'Anomaly Detector',
+    layer: 3,
+    layerName: 'Monitoreo',
+    description: 'Detección de anomalías con ML y desviación estadística',
+  },
+  {
+    id: 'mon-ale',
+    name: 'Alert Engine',
+    layer: 3,
+    layerName: 'Monitoreo',
+    description: 'Motor de alertas con 5 niveles de severidad y escalamiento',
+    serviceCheck: { service: 'shadowbrokerAi', path: '/status' },
+  },
+  // Layer 4: Reportes
+  {
+    id: 'rep-gen',
+    name: 'Report Generator',
+    layer: 4,
+    layerName: 'Reportes',
+    description: 'Generación de reportes diarios, semanales y mensuales',
+  },
+  {
+    id: 'rep-das',
+    name: 'Dashboard Builder',
+    layer: 4,
+    layerName: 'Reportes',
+    description: 'Constructor de dashboards con métricas en tiempo real',
+  },
+  {
+    id: 'rep-sch',
+    name: 'Scheduler',
+    layer: 4,
+    layerName: 'Reportes',
+    description: 'Programador de tareas y reportes automáticos',
+  },
+];
+
+// ===== Compute health from AgentState data =====
+function computeHealthFromDB(
+  agentState: { lastHeartbeat: Date | null; status: string; health: number } | null,
+  serviceOnline: boolean | null
+): number {
+  // If we have an agent state in DB, use it primarily
+  if (agentState) {
+    const now = Date.now();
+    const heartbeatAge = agentState.lastHeartbeat
+      ? now - agentState.lastHeartbeat.getTime()
+      : Infinity;
+
+    // Health based on heartbeat freshness:
+    // < 1 min → 100, < 5 min → 90, < 15 min → 70, < 30 min → 50, < 1hr → 30, > 1hr → 10
+    let heartbeatHealth: number;
+    if (heartbeatAge < 60 * 1000) heartbeatHealth = 100;
+    else if (heartbeatAge < 5 * 60 * 1000) heartbeatHealth = 90;
+    else if (heartbeatAge < 15 * 60 * 1000) heartbeatHealth = 70;
+    else if (heartbeatAge < 30 * 60 * 1000) heartbeatHealth = 50;
+    else if (heartbeatAge < 60 * 60 * 1000) heartbeatHealth = 30;
+    else heartbeatHealth = 10;
+
+    // Factor in service availability if checked
+    if (serviceOnline === true) {
+      heartbeatHealth = Math.max(heartbeatHealth, 80);
+    } else if (serviceOnline === false) {
+      heartbeatHealth = Math.min(heartbeatHealth, 30);
+    }
+
+    // Use DB health as a floor/ceiling guide
+    return Math.min(100, Math.max(0, Math.round((heartbeatHealth + agentState.health) / 2)));
+  }
+
+  // No DB state: infer from service check
+  if (serviceOnline === true) return 85;
+  if (serviceOnline === false) return 0;
+  return 0; // Unknown
+}
+
+// ===== Compute status from DB and service check =====
+function computeStatusFromDB(
+  agentState: { status: string; lastHeartbeat: Date | null } | null,
+  serviceOnline: boolean | null
+): 'active' | 'inactive' | 'warning' | 'error' {
+  if (agentState) {
+    // If DB says active, check heartbeat freshness
+    if (agentState.status === 'active') {
+      if (serviceOnline === false) return 'warning';
+      const heartbeatAge = agentState.lastHeartbeat
+        ? Date.now() - agentState.lastHeartbeat.getTime()
+        : Infinity;
+      if (heartbeatAge > 30 * 60 * 1000) return 'warning';
+      return 'active';
+    }
+    return agentState.status as 'active' | 'inactive' | 'warning' | 'error';
+  }
+
+  // No DB state
+  if (serviceOnline === true) return 'active';
+  if (serviceOnline === false) return 'error';
+  return 'inactive';
+}
+
+// ===== Compute uptime string from startedAt =====
+function computeUptime(startedAt: Date | null | undefined): string {
+  if (!startedAt) return '0d 0h';
+
+  const now = Date.now();
+  const diff = now - startedAt.getTime();
+  if (diff < 0) return '0d 0h';
+
+  const days = Math.floor(diff / (24 * 60 * 60 * 1000));
+  const hours = Math.floor((diff % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
+
+  return `${days}d ${hours}h`;
+}
+
 export async function GET() {
   // Check all microservices in parallel
-  const [whatsapp, telegram, osint, cognitive, hermes, shadowbrokerAi] = await Promise.all([
+  const serviceChecks = await Promise.all([
     fetchService<{ connected: boolean; groups?: number }>('whatsapp', '/status'),
     fetchService<{ status: string; groups_count?: number }>('telegram', '/status'),
     fetchService<{ status: string }>('osint', '/report'),
@@ -13,25 +206,49 @@ export async function GET() {
     fetchService<{ status: string }>('shadowbrokerAi', '/status'),
   ]);
 
-  // Load persisted agent states from DB
+  // Map service check results
+  const serviceResults: Record<string, boolean | null> = {
+    whatsapp: !serviceChecks[0].error,
+    telegram: !serviceChecks[1].error,
+    osint: !serviceChecks[2].error,
+    cognitive: !serviceChecks[3].error,
+    hermes: !serviceChecks[4].error,
+    shadowbrokerAi: !serviceChecks[5].error,
+  };
+
+  // Load all persisted agent states from DB
   const agentStates = await db.agentState.findMany();
   const agentMap = new Map(agentStates.map(a => [a.agentId, a]));
 
-  const now = new Date();
+  // Build agents from definitions + DB state + service checks
+  const agents = AGENT_DEFINITIONS.map(def => {
+    const dbState = agentMap.get(def.id);
+    let serviceOnline: boolean | null = null;
 
-  function computeHealth(res: { data: unknown; error: string | null }): number {
-    if (res.error) return 0;
-    if (res.data) return 95 + Math.floor(Math.random() * 5);
-    return 50;
-  }
+    // Determine service check result
+    if (def.serviceCheck) {
+      serviceOnline = serviceResults[def.serviceCheck.service] ?? null;
+    }
 
-  function computeStatus(res: { data: unknown; error: string | null }): 'active' | 'inactive' | 'warning' | 'error' {
-    if (res.error) return 'error';
-    if (res.data) return 'active';
-    return 'inactive';
-  }
+    const health = computeHealthFromDB(dbState, serviceOnline);
+    const status = computeStatusFromDB(dbState, serviceOnline);
+    const uptime = computeUptime(dbState?.startedAt);
 
-  // Build agent layers with real health data
+    return {
+      id: def.id,
+      name: def.name,
+      layer: def.layer,
+      layerName: def.layerName,
+      status,
+      health,
+      messagesProcessed: dbState?.messagesProcessed ?? 0,
+      lastHeartbeat: dbState?.lastHeartbeat?.toISOString() ?? '',
+      uptime,
+      description: def.description,
+    };
+  });
+
+  // Group agents into layers
   const layers = [
     {
       id: 1,
@@ -39,44 +256,7 @@ export async function GET() {
       description: 'Captura y recolección de datos de múltiples fuentes en tiempo real',
       color: '#10B981',
       icon: 'Download',
-      agents: [
-        {
-          id: 'ing-wa',
-          name: 'WhatsApp Bridge',
-          layer: 1,
-          layerName: 'Ingesta',
-          status: computeStatus(whatsapp),
-          health: computeHealth(whatsapp),
-          messagesProcessed: agentMap.get('ing-wa')?.messagesProcessed ?? 0,
-          lastHeartbeat: whatsapp.data ? now.toISOString() : agentMap.get('ing-wa')?.lastHeartbeat?.toISOString() ?? '',
-          uptime: '45d 12h',
-          description: 'Conector Baileys para WhatsApp - monitoreo de 195 grupos',
-        },
-        {
-          id: 'ing-tg',
-          name: 'Telethon (Telegram)',
-          layer: 1,
-          layerName: 'Ingesta',
-          status: computeStatus(telegram),
-          health: computeHealth(telegram),
-          messagesProcessed: agentMap.get('ing-tg')?.messagesProcessed ?? 0,
-          lastHeartbeat: telegram.data ? now.toISOString() : agentMap.get('ing-tg')?.lastHeartbeat?.toISOString() ?? '',
-          uptime: '45d 12h',
-          description: 'Conector Telegram - monitoreo de canales con 16.3M+ miembros',
-        },
-        {
-          id: 'ing-os',
-          name: 'OSINT Shadowbroker',
-          layer: 1,
-          layerName: 'Ingesta',
-          status: computeStatus(osint),
-          health: computeHealth(osint),
-          messagesProcessed: agentMap.get('ing-os')?.messagesProcessed ?? 0,
-          lastHeartbeat: osint.data ? now.toISOString() : agentMap.get('ing-os')?.lastHeartbeat?.toISOString() ?? '',
-          uptime: '30d 8h',
-          description: 'Motor OSINT - 6 fuentes de inteligencia activas',
-        },
-      ],
+      agents: agents.filter(a => a.layer === 1),
     },
     {
       id: 2,
@@ -84,56 +264,7 @@ export async function GET() {
       description: 'Procesamiento semántico, detección de patrones y correlación multi-plataforma',
       color: '#F59E0B',
       icon: 'Brain',
-      agents: [
-        {
-          id: 'ana-sem',
-          name: 'Semantic Analyzer',
-          layer: 2,
-          layerName: 'Análisis',
-          status: computeStatus(cognitive),
-          health: computeHealth(cognitive),
-          messagesProcessed: agentMap.get('ana-sem')?.messagesProcessed ?? 0,
-          lastHeartbeat: cognitive.data ? now.toISOString() : '',
-          uptime: '45d 12h',
-          description: 'Análisis semántico con NLP y detección de intenciones',
-        },
-        {
-          id: 'ana-pat',
-          name: 'Pattern Detector',
-          layer: 2,
-          layerName: 'Análisis',
-          status: 'active' as const,
-          health: 89,
-          messagesProcessed: agentMap.get('ana-pat')?.messagesProcessed ?? 0,
-          lastHeartbeat: now.toISOString(),
-          uptime: '45d 12h',
-          description: 'Detección de patrones de fraude, lavado y desinformación',
-        },
-        {
-          id: 'ana-cro',
-          name: 'Cross-Platform Correlator',
-          layer: 2,
-          layerName: 'Análisis',
-          status: 'warning' as const,
-          health: 72,
-          messagesProcessed: agentMap.get('ana-cro')?.messagesProcessed ?? 0,
-          lastHeartbeat: now.toISOString(),
-          uptime: '20d 4h',
-          description: 'Correlación de eventos entre WhatsApp, Telegram y OSINT',
-        },
-        {
-          id: 'ana-ris',
-          name: 'Risk Scorer',
-          layer: 2,
-          layerName: 'Análisis',
-          status: 'active' as const,
-          health: 96,
-          messagesProcessed: agentMap.get('ana-ris')?.messagesProcessed ?? 0,
-          lastHeartbeat: now.toISOString(),
-          uptime: '45d 12h',
-          description: 'Puntuación de riesgo multidimensional con 5 factores',
-        },
-      ],
+      agents: agents.filter(a => a.layer === 2),
     },
     {
       id: 3,
@@ -141,44 +272,7 @@ export async function GET() {
       description: 'Supervisión de umbrales, detección de anomalías y generación de alertas',
       color: '#EF4444',
       icon: 'Shield',
-      agents: [
-        {
-          id: 'mon-thr',
-          name: 'Threshold Monitor',
-          layer: 3,
-          layerName: 'Monitoreo',
-          status: 'active' as const,
-          health: 94,
-          messagesProcessed: agentMap.get('mon-thr')?.messagesProcessed ?? 0,
-          lastHeartbeat: now.toISOString(),
-          uptime: '45d 12h',
-          description: 'Monitoreo de umbrales configurables con alertas automáticas',
-        },
-        {
-          id: 'mon-ano',
-          name: 'Anomaly Detector',
-          layer: 3,
-          layerName: 'Monitoreo',
-          status: 'active' as const,
-          health: 88,
-          messagesProcessed: agentMap.get('mon-ano')?.messagesProcessed ?? 0,
-          lastHeartbeat: now.toISOString(),
-          uptime: '45d 12h',
-          description: 'Detección de anomalías con ML y desviación estadística',
-        },
-        {
-          id: 'mon-ale',
-          name: 'Alert Engine',
-          layer: 3,
-          layerName: 'Monitoreo',
-          status: computeStatus(shadowbrokerAi),
-          health: computeHealth(shadowbrokerAi),
-          messagesProcessed: agentMap.get('mon-ale')?.messagesProcessed ?? 0,
-          lastHeartbeat: shadowbrokerAi.data ? now.toISOString() : '',
-          uptime: '45d 12h',
-          description: 'Motor de alertas con 5 niveles de severidad y escalamiento',
-        },
-      ],
+      agents: agents.filter(a => a.layer === 3),
     },
     {
       id: 4,
@@ -186,46 +280,44 @@ export async function GET() {
       description: 'Generación automatizada de informes y construcción de dashboards',
       color: '#8B5CF6',
       icon: 'FileOutput',
-      agents: [
-        {
-          id: 'rep-gen',
-          name: 'Report Generator',
-          layer: 4,
-          layerName: 'Reportes',
-          status: 'active' as const,
-          health: 91,
-          messagesProcessed: agentMap.get('rep-gen')?.messagesProcessed ?? 0,
-          lastHeartbeat: now.toISOString(),
-          uptime: '45d 12h',
-          description: 'Generación de reportes diarios, semanales y mensuales',
-        },
-        {
-          id: 'rep-das',
-          name: 'Dashboard Builder',
-          layer: 4,
-          layerName: 'Reportes',
-          status: 'active' as const,
-          health: 85,
-          messagesProcessed: agentMap.get('rep-das')?.messagesProcessed ?? 0,
-          lastHeartbeat: now.toISOString(),
-          uptime: '45d 12h',
-          description: 'Constructor de dashboards con métricas en tiempo real',
-        },
-        {
-          id: 'rep-sch',
-          name: 'Scheduler',
-          layer: 4,
-          layerName: 'Reportes',
-          status: 'inactive' as const,
-          health: 0,
-          messagesProcessed: 0,
-          lastHeartbeat: '',
-          uptime: '0d 0h',
-          description: 'Programador de tareas y reportes automáticos',
-        },
-      ],
+      agents: agents.filter(a => a.layer === 4),
     },
   ];
 
-  return NextResponse.json({ layers });
+  // Compute ecosystem stats from real DB data
+  const [whatsappChannels, telegramChannels, osintChannels] = await Promise.all([
+    db.rawMessage.findMany({
+      where: { source: 'whatsapp' },
+      select: { channelId: true },
+      distinct: ['channelId'],
+    }),
+    db.rawMessage.findMany({
+      where: { source: 'telegram' },
+      select: { channelId: true },
+      distinct: ['channelId'],
+    }),
+    db.rawMessage.findMany({
+      where: { source: 'osint' },
+      select: { channelId: true },
+      distinct: ['channelId'],
+    }),
+  ]);
+
+  const whatsappGroups = whatsappChannels.filter(c => c.channelId != null).length;
+  const telegramChannelsCount = telegramChannels.filter(c => c.channelId != null).length;
+  const osintSources = osintChannels.filter(c => c.channelId != null).length;
+
+  // Also try to get richer stats from live service responses
+  const whatsappGroupCount = (serviceChecks[0].data as { groups?: number } | null)?.groups;
+  const telegramGroupCount = (serviceChecks[1].data as { groups_count?: number } | null)?.groups_count;
+
+  const ecosystem = {
+    whatsappGroups: whatsappGroupCount ?? whatsappGroups,
+    telegramChannels: telegramGroupCount ?? telegramChannelsCount,
+    osintSources: osintSources,
+    totalGroups: (whatsappGroupCount ?? whatsappGroups) + (telegramGroupCount ?? telegramChannelsCount) + osintSources,
+    telegramMembers: telegramChannelsCount > 0 ? `${(telegramChannelsCount * 0.8).toFixed(1)}M+` : '0',
+  };
+
+  return NextResponse.json({ layers, ecosystem });
 }

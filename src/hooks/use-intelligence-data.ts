@@ -14,6 +14,7 @@ import type {
   EventBusEvent,
   ReportTemplate,
 } from '@/lib/intelligence/types';
+import type { EcosystemStats, StrategySignals } from '@/lib/store';
 
 /**
  * Hook to hydrate the intelligence store from real API routes.
@@ -30,6 +31,10 @@ export function useIntelligenceData() {
       if (res.ok) {
         const data = await res.json();
         store.setAgentLayers((data.layers ?? []) as AgentLayer[]);
+        // Store ecosystem stats from the agents API response
+        if (data.ecosystem) {
+          store.setEcosystem(data.ecosystem as EcosystemStats);
+        }
       }
     } catch {
       /* service unavailable */
@@ -155,6 +160,20 @@ export function useIntelligenceData() {
     }
   }, [store]);
 
+  const fetchEvents = useCallback(async () => {
+    try {
+      const res = await fetch('/api/events');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          store.setEventBus(data as EventBusEvent[]);
+        }
+      }
+    } catch {
+      /* service unavailable */
+    }
+  }, [store]);
+
   const fetchOsint = useCallback(async () => {
     try {
       const res = await fetch('/api/osint');
@@ -177,6 +196,18 @@ export function useIntelligenceData() {
     }
   }, [store]);
 
+  const fetchSignals = useCallback(async () => {
+    try {
+      const res = await fetch('/api/strategies/signals');
+      if (res.ok) {
+        const data: StrategySignals = await res.json();
+        store.setSignals(data);
+      }
+    } catch {
+      /* service unavailable */
+    }
+  }, [store]);
+
   // Initial hydration
   useEffect(() => {
     if (initialized.current) return;
@@ -187,9 +218,11 @@ export function useIntelligenceData() {
       fetchAlerts(),
       fetchStrategies(),
       fetchReports(),
+      fetchEvents(),
       fetchOsint(),
+      fetchSignals(),
     ]);
-  }, [fetchAgents, fetchAlerts, fetchStrategies, fetchReports, fetchOsint]);
+  }, [fetchAgents, fetchAlerts, fetchStrategies, fetchReports, fetchEvents, fetchOsint, fetchSignals]);
 
   // Auto-refresh every 30 seconds
   useEffect(() => {
@@ -197,10 +230,12 @@ export function useIntelligenceData() {
       fetchAgents();
       fetchAlerts();
       fetchStrategies();
+      fetchEvents();
       fetchOsint();
+      fetchSignals();
     }, 30000);
     return () => clearInterval(interval);
-  }, [fetchAgents, fetchAlerts, fetchStrategies, fetchOsint]);
+  }, [fetchAgents, fetchAlerts, fetchStrategies, fetchEvents, fetchOsint, fetchSignals]);
 
   return {
     refresh: useCallback(() => {
@@ -208,8 +243,10 @@ export function useIntelligenceData() {
       fetchAlerts();
       fetchStrategies();
       fetchReports();
+      fetchEvents();
       fetchOsint();
-    }, [fetchAgents, fetchAlerts, fetchStrategies, fetchReports, fetchOsint]),
+      fetchSignals();
+    }, [fetchAgents, fetchAlerts, fetchStrategies, fetchReports, fetchEvents, fetchOsint, fetchSignals]),
   };
 }
 

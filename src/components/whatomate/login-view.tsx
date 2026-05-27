@@ -34,11 +34,12 @@ export function LoginView({ onLogin }: LoginViewProps) {
         const token = data.token || data.access_token || data.data?.token;
         if (token) {
           localStorage.setItem('whatomate_token', token);
+          localStorage.setItem('whatomate_authenticated', 'true');
           onLogin(token);
         } else {
-          // If the backend returns a different structure, still consider login successful
-          localStorage.setItem('whatomate_token', 'mock-jwt-token');
-          onLogin('mock-jwt-token');
+          // Backend returned OK but no token — mark session as authenticated
+          localStorage.setItem('whatomate_authenticated', 'true');
+          onLogin('session');
         }
       } else {
         // Try to parse error
@@ -48,18 +49,18 @@ export function LoginView({ onLogin }: LoginViewProps) {
         } catch {
           setError('Invalid credentials. Please try again.');
         }
-        // For demo purposes, allow login even if backend is down
+        // If backend is unreachable (502/500), allow session-based access
         if (response.status === 502 || response.status === 500) {
-          localStorage.setItem('whatomate_token', 'demo-token');
-          onLogin('demo-token');
+          localStorage.setItem('whatomate_authenticated', 'true');
+          onLogin('session');
         }
       }
     } catch {
-      // Backend unavailable - use demo mode
-      setError('Backend unavailable. Using demo mode.');
+      // Backend unavailable — allow session-based login for offline use
+      setError('Backend unavailable. Using offline session.');
       setTimeout(() => {
-        localStorage.setItem('whatomate_token', 'demo-token');
-        onLogin('demo-token');
+        localStorage.setItem('whatomate_authenticated', 'true');
+        onLogin('session');
       }, 1000);
     } finally {
       setLoading(false);

@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -31,10 +31,30 @@ import {
   GitBranch,
   Zap,
   ArrowRight,
+  Loader2,
 } from 'lucide-react';
-import { mockChatbotFlows } from '@/lib/mock-data';
+
+interface ChatbotFlow {
+  id: string;
+  name: string;
+  status: 'active' | 'inactive' | 'draft';
+  triggerKeyword: string;
+  nodes: number;
+  lastModified: string;
+}
 
 export function ChatbotView() {
+  const [flows, setFlows] = useState<ChatbotFlow[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch('/api/hermes/chatbot')
+      .then((res) => res.json())
+      .then((data) => setFlows(data.flows || []))
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, []);
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'active':
@@ -49,11 +69,19 @@ export function ChatbotView() {
   };
 
   const quickStats = [
-    { label: 'Active Flows', value: mockChatbotFlows.filter(f => f.status === 'active').length, icon: Zap, color: 'bg-[#25D366]/10 text-[#25D366]' },
-    { label: 'Total Nodes', value: mockChatbotFlows.reduce((acc, f) => acc + f.nodes, 0), icon: GitBranch, color: 'bg-blue-500/10 text-blue-500' },
-    { label: 'Conversations Today', value: 147, icon: Bot, color: 'bg-purple-500/10 text-purple-500' },
-    { label: 'Success Rate', value: '94%', icon: Workflow, color: 'bg-orange-500/10 text-orange-500' },
+    { label: 'Active Flows', value: flows.filter(f => f.status === 'active').length, icon: Zap, color: 'bg-[#25D366]/10 text-[#25D366]' },
+    { label: 'Total Nodes', value: flows.reduce((acc, f) => acc + f.nodes, 0), icon: GitBranch, color: 'bg-blue-500/10 text-blue-500' },
+    { label: 'Total Flows', value: flows.length, icon: Bot, color: 'bg-purple-500/10 text-purple-500' },
+    { label: 'Draft Flows', value: flows.filter(f => f.status === 'draft').length, icon: Workflow, color: 'bg-orange-500/10 text-orange-500' },
   ];
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="w-8 h-8 animate-spin text-[#25D366]" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -104,83 +132,89 @@ export function ChatbotView() {
 
       <Card className="border-0 shadow-sm">
         <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Flow Name</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="hidden sm:table-cell">Trigger</TableHead>
-                <TableHead className="hidden md:table-cell">Nodes</TableHead>
-                <TableHead className="hidden lg:table-cell">Last Modified</TableHead>
-                <TableHead className="w-[50px]"></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {mockChatbotFlows.map((flow) => (
-                <TableRow key={flow.id} className="hover:bg-muted/30">
-                  <TableCell>
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-[#25D366]/10 flex items-center justify-center">
-                        <Bot className="w-4 h-4 text-[#25D366]" />
-                      </div>
-                      <div>
-                        <p className="font-medium text-sm">{flow.name}</p>
-                        <p className="text-xs text-muted-foreground sm:hidden">
-                          Trigger: {flow.triggerKeyword}
-                        </p>
-                      </div>
-                    </div>
-                  </TableCell>
-                  <TableCell>{getStatusBadge(flow.status)}</TableCell>
-                  <TableCell className="hidden sm:table-cell">
-                    <Badge variant="outline" className="font-mono text-xs">
-                      {flow.triggerKeyword}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="hidden md:table-cell text-sm text-muted-foreground">
-                    {flow.nodes} nodes
-                  </TableCell>
-                  <TableCell className="hidden lg:table-cell text-sm text-muted-foreground">
-                    {flow.lastModified}
-                  </TableCell>
-                  <TableCell>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
-                          <MoreVertical className="w-4 h-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem>
-                          <Edit className="w-4 h-4 mr-2" />
-                          Edit Flow
-                        </DropdownMenuItem>
-                        <DropdownMenuItem>
-                          <Copy className="w-4 h-4 mr-2" />
-                          Duplicate
-                        </DropdownMenuItem>
-                        {flow.status === 'active' ? (
-                          <DropdownMenuItem>
-                            <Pause className="w-4 h-4 mr-2" />
-                            Deactivate
-                          </DropdownMenuItem>
-                        ) : (
-                          <DropdownMenuItem>
-                            <Play className="w-4 h-4 mr-2" />
-                            Activate
-                          </DropdownMenuItem>
-                        )}
-                        <DropdownMenuItem className="text-destructive">
-                          <Trash2 className="w-4 h-4 mr-2" />
-                          Delete
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </TableCell>
+          {flows.length > 0 ? (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Flow Name</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="hidden sm:table-cell">Trigger</TableHead>
+                  <TableHead className="hidden md:table-cell">Nodes</TableHead>
+                  <TableHead className="hidden lg:table-cell">Last Modified</TableHead>
+                  <TableHead className="w-[50px]"></TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {flows.map((flow) => (
+                  <TableRow key={flow.id} className="hover:bg-muted/30">
+                    <TableCell>
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-lg bg-[#25D366]/10 flex items-center justify-center">
+                          <Bot className="w-4 h-4 text-[#25D366]" />
+                        </div>
+                        <div>
+                          <p className="font-medium text-sm">{flow.name}</p>
+                          <p className="text-xs text-muted-foreground sm:hidden">
+                            Trigger: {flow.triggerKeyword}
+                          </p>
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell>{getStatusBadge(flow.status)}</TableCell>
+                    <TableCell className="hidden sm:table-cell">
+                      <Badge variant="outline" className="font-mono text-xs">
+                        {flow.triggerKeyword}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="hidden md:table-cell text-sm text-muted-foreground">
+                      {flow.nodes} nodes
+                    </TableCell>
+                    <TableCell className="hidden lg:table-cell text-sm text-muted-foreground">
+                      {flow.lastModified}
+                    </TableCell>
+                    <TableCell>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                            <MoreVertical className="w-4 h-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem>
+                            <Edit className="w-4 h-4 mr-2" />
+                            Edit Flow
+                          </DropdownMenuItem>
+                          <DropdownMenuItem>
+                            <Copy className="w-4 h-4 mr-2" />
+                            Duplicate
+                          </DropdownMenuItem>
+                          {flow.status === 'active' ? (
+                            <DropdownMenuItem>
+                              <Pause className="w-4 h-4 mr-2" />
+                              Deactivate
+                            </DropdownMenuItem>
+                          ) : (
+                            <DropdownMenuItem>
+                              <Play className="w-4 h-4 mr-2" />
+                              Activate
+                            </DropdownMenuItem>
+                          )}
+                          <DropdownMenuItem className="text-destructive">
+                            <Trash2 className="w-4 h-4 mr-2" />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          ) : (
+            <div className="py-12 text-center text-muted-foreground text-sm">
+              No chatbot flows found. Connect Hermes to manage WhatsApp chatbot flows.
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

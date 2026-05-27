@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -68,49 +68,12 @@ const pieChartConfig = {
 const PIE_COLORS = ['#EF4444', '#F97316', '#F59E0B', '#14B8A6', '#9CA3AF'];
 
 export function MonitoringView() {
-  const { alerts, addAlert, acknowledgeAlert, dismissAlert, escalateAlert, threatLevel } = useWhatomateStore();
+  const { alerts, acknowledgeAlert, dismissAlert, escalateAlert, threatLevel } = useWhatomateStore();
   useIntelligenceData();
   const [severityFilter, setSeverityFilter] = useState<string>('all');
   const [sourceFilter, setSourceFilter] = useState<string>('all');
   const [expandedAlert, setExpandedAlert] = useState<string | null>(null);
   const feedRef = useRef<HTMLDivElement>(null);
-
-  // Simulate real-time alerts
-  useEffect(() => {
-    const sources = ['WhatsApp Bridge', 'Telethon', 'OSINT Shadowbroker', 'Pattern Detector', 'Risk Scorer', 'Anomaly Detector', 'Threshold Monitor'];
-    const severities: Array<'CRÍTICA' | 'ALTA' | 'MEDIA' | 'BAJA' | 'INFO'> = ['INFO', 'BAJA', 'MEDIA', 'MEDIA', 'ALTA', 'ALTA', 'CRÍTICA'];
-    const titles = [
-      'Nuevo mensaje sospechoso detectado',
-      'Actividad inusual en canal monitoreado',
-      'Umbral de menciones superado',
-      'Actualización de fuente OSINT',
-      'Correlación multi-plataforma identificada',
-      'Anomalía estadística en volumen de mensajes',
-      'Patrón de fraude potencial detectado',
-    ];
-
-    const interval = setInterval(() => {
-      const now = new Date();
-      const sev = severities[Math.floor(Math.random() * severities.length)];
-      const src = sources[Math.floor(Math.random() * sources.length)];
-      const title = titles[Math.floor(Math.random() * titles.length)];
-      const alert = {
-        id: `live-${Date.now()}`,
-        timestamp: formatTimestamp(now),
-        source: src,
-        severity: sev,
-        title,
-        description: `Alerta generada automáticamente por el sistema de monitoreo. Fuente: ${src}. Se requiere revisión del evento detectado.`,
-        actionTaken: 'Notificación automática enviada.',
-        strategy: 'threshold' as const,
-        acknowledged: false,
-        escalated: false,
-      };
-      addAlert(alert);
-    }, 8000);
-
-    return () => clearInterval(interval);
-  }, [addAlert]);
 
   const filteredAlerts = alerts.filter((a) => {
     if (severityFilter !== 'all' && a.severity !== severityFilter) return false;
@@ -128,14 +91,27 @@ export function MonitoringView() {
     { name: 'INFO', value: alerts.filter((a) => a.severity === 'INFO').length },
   ];
 
-  const alertTrendData = [
-    { hour: '18:00', count: 8 },
-    { hour: '19:00', count: 12 },
-    { hour: '20:00', count: 6 },
-    { hour: '21:00', count: 15 },
-    { hour: '22:00', count: 10 },
-    { hour: '23:00', count: alerts.length },
-  ];
+  // Compute alert trend from real data (group by hour for last 6 hours)
+  const alertTrendData = (() => {
+    const now = new Date();
+    const hours: { hour: string; count: number }[] = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getTime() - i * 60 * 60 * 1000);
+      const hourLabel = `${d.getHours().toString().padStart(2, '0')}:00`;
+      const hourStart = new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), 0, 0, 0);
+      const hourEnd = new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), 59, 59, 999);
+      const count = alerts.filter((a) => {
+        try {
+          const ts = new Date(a.timestamp);
+          return ts >= hourStart && ts <= hourEnd;
+        } catch {
+          return false;
+        }
+      }).length;
+      hours.push({ hour: hourLabel, count });
+    }
+    return hours;
+  })();
 
   const getThreatColor = (level: number) => {
     if (level >= 80) return '#EF4444';
@@ -458,7 +434,7 @@ export function MonitoringView() {
             <span>Mostrando {Math.min(filteredAlerts.length, 30)} de {filteredAlerts.length} alertas</span>
             <div className="flex items-center gap-2">
               <Clock className="w-3 h-3" />
-              <span>Actualización automática cada 8s</span>
+              <span>Actualización automática cada 30s</span>
             </div>
           </div>
         </CardContent>
