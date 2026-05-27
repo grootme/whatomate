@@ -87,6 +87,7 @@ venv/
 # Database
 *.db
 *.sqlite
+*.db-journal
 
 # PM2
 .pm2/
@@ -118,3 +119,6 @@ backend/whatomate
 
 # Telethon config (has API credentials)
 telethon-service/config.py
+
+# Backend config (has real credentials)
+backend/config.toml

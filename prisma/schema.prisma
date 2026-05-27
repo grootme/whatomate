@@ -145,6 +145,7 @@ model ThresholdConfig {
   enabled       Boolean   @default(true)
   currentValue  Float     @default(0)
   lastTriggered DateTime?
+  metadata      String?   // JSON: { adaptiveBounds: { min: number, max: number }, ... }
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -263,4 +264,17 @@ model Prediction {
 
   @@index([metric])
   @@index([targetTime])
+}
+
+// ===== RISK DIMENSIONS (persisted, configurable) =====
+model RiskDimension {
+  id          String   @id @default(cuid())
+  name        String   @unique // Naturaleza | Volumen | Conexiones | Contexto OSINT | Recencia
+  weight      Int      // 0-100 (percentage)
+  description String
+  color       String   // hex color for charts
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([name])
 }

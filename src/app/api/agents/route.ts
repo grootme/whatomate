@@ -311,12 +311,23 @@ export async function GET() {
   const whatsappGroupCount = (serviceChecks[0].data as { groups?: number } | null)?.groups;
   const telegramGroupCount = (serviceChecks[1].data as { groups_count?: number } | null)?.groups_count;
 
+  // Compute telegramMembers from live service response (real member count)
+  // Fall back to DB: estimate based on distinct channels × avg member count from last check
+  const telegramMemberCount = (serviceChecks[1].data as { total_members?: number; members_count?: number } | null)?.total_members
+    ?? (serviceChecks[1].data as { total_members?: number; members_count?: number } | null)?.members_count;
+
   const ecosystem = {
     whatsappGroups: whatsappGroupCount ?? whatsappGroups,
     telegramChannels: telegramGroupCount ?? telegramChannelsCount,
     osintSources: osintSources,
     totalGroups: (whatsappGroupCount ?? whatsappGroups) + (telegramGroupCount ?? telegramChannelsCount) + osintSources,
-    telegramMembers: telegramChannelsCount > 0 ? `${(telegramChannelsCount * 0.8).toFixed(1)}M+` : '0',
+    telegramMembers: telegramMemberCount != null
+      ? telegramMemberCount > 1000000
+        ? `${(telegramMemberCount / 1000000).toFixed(1)}M+`
+        : telegramMemberCount > 1000
+          ? `${(telegramMemberCount / 1000).toFixed(1)}K+`
+          : String(telegramMemberCount)
+      : 'N/A',
   };
 
   return NextResponse.json({ layers, ecosystem });

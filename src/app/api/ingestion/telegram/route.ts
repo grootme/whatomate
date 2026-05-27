@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server';
+import { withAuth } from '@/lib/intelligence/auth';
 import { db } from '@/lib/db';
 import { safeEventAppend } from '@/lib/intelligence/safe-event';
 import { fetchService } from '@/lib/intelligence/service-client';
 
 // ===== GET: Fetch messages from Telethon service and ingest =====
-export async function GET() {
+async function _GET() {
   try {
     // Step 1: Get list of groups from the Telegram service
     const groupsResponse = await fetchService<{
@@ -206,3 +207,5 @@ export async function GET() {
     );
   }
 }
+
+export const GET = withAuth(_GET);

@@ -157,6 +157,10 @@ export interface ThresholdConfig {
   enabled: boolean;
   currentValue: number;
   lastTriggered?: Date;
+  metadata?: {
+    adaptiveBounds?: { min: number; max: number };
+    [key: string]: unknown;
+  };
 }
 
 export interface Alert {

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { generateReport } from '@/lib/intelligence/report-generator';
 
 export async function GET() {
   const reports = await db.report.findMany({
@@ -50,21 +51,10 @@ export async function POST(request: Request) {
     },
   });
 
-  // Trigger async report generation via the generate endpoint
+  // Trigger async report generation directly (no self-fetch)
   // Don't await — let it run in the background so the user gets an immediate response
-  fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/reports/generate`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ reportId: report.id }),
-  }).catch((err) => {
+  generateReport(report.id).catch((err) => {
     console.error('Failed to trigger report generation:', err);
-    // Attempt to mark the report as error since generation failed to start
-    db.report.update({
-      where: { id: report.id },
-      data: { status: 'error' },
-    }).catch(() => {
-      // Silently handle — error status update is best-effort
-    });
   });
 
   return NextResponse.json(report, { status: 201 });

@@ -1,15 +1,14 @@
 import { NextResponse } from 'next/server';
+import { withAuth } from '@/lib/intelligence/auth';
 import { db } from '@/lib/db';
-import { safeEventAppend } from '@/lib/intelligence/safe-event';
+import { persistEvent } from '@/lib/intelligence/event-persist';
+import { isContentSuspicious, isFraudRelated, FRAUD_KEYWORDS } from '@/lib/intelligence/analysis-engine';
 import { strategyRegistry } from '@/lib/intelligence/strategies';
 import { buildStrategyContext } from '@/lib/intelligence/context-builder';
 import type { MessageSource, EventStream } from '@/lib/intelligence/types';
 
-// ===== SUSPICIOUS KEYWORDS for fraud detection =====
-const FRAUD_KEYWORDS = ['fraude', 'estafa', 'scam', 'crypto', 'invertir', 'dinero'];
-
 // ===== POST: Ingest messages from any source =====
-export async function POST(request: Request) {
+async function _POST(request: Request) {
   try {
     const body = await request.json();
     const { source, messages } = body as {
@@ -103,13 +102,12 @@ export async function POST(request: Request) {
       inserted++;
       insertedMessages.push(rawMessage);
 
-      // Check for suspicious content
-      const contentLower = msg.content.toLowerCase();
-      const isSuspicious = FRAUD_KEYWORDS.some(kw => contentLower.includes(kw));
+      // Check for suspicious content using shared analysis engine
+      const isSuspicious = isFraudRelated(msg.content);
       if (isSuspicious) suspiciousCount++;
 
-      // Emit event to Redis Stream (non-blocking, with timeout)
-      safeEventAppend(streamMap[source], {
+      // Persist event to both Redis Stream and SQLite via persistEvent
+      await persistEvent(streamMap[source], {
         eventType: 'ingestion.raw_message',
         aggregateId: rawMessage.id,
         aggregateType: 'message',
@@ -122,24 +120,6 @@ export async function POST(request: Request) {
           suspicious: isSuspicious,
         },
         metadata: { contentHash, channelId: msg.channelId },
-      });
-
-      // Persist event to IntelligenceEvent table for durability
-      await db.intelligenceEvent.create({
-        data: {
-          eventType: 'ingestion.raw_message',
-          aggregateId: rawMessage.id,
-          aggregateType: 'message',
-          stream: streamMap[source],
-          payload: JSON.stringify({
-            source,
-            sourceId: msg.sourceId,
-            channelName: msg.channelName,
-            suspicious: isSuspicious,
-          }),
-          metadata: JSON.stringify({ contentHash }),
-          processed: false,
-        },
       });
 
       events++;
@@ -199,7 +179,7 @@ export async function POST(request: Request) {
         select: { content: true },
       });
       const actualSuspiciousCount = allRecentMessages.filter(m =>
-        FRAUD_KEYWORDS.some(kw => m.content.toLowerCase().includes(kw))
+        isFraudRelated(m.content)
       ).length;
 
       const fraudThreshold = await db.thresholdConfig.findFirst({
@@ -252,25 +232,21 @@ export async function POST(request: Request) {
               alertsFromStrategies++;
             }
 
-            // Create IntelligenceEvent for each strategy result
-            await db.intelligenceEvent.create({
-              data: {
-                eventType: 'monitoring.alert_generated',
-                aggregateId: `strategy_${strategy.id}_${Date.now()}`,
-                aggregateType: 'alert',
-                stream: 'whatomate:decisions',
-                payload: JSON.stringify({
-                  strategy: strategy.id,
-                  action: result.action,
-                  severity: result.severity,
-                  confidence: result.confidence,
-                  reasoning: result.reasoning,
-                  triggeredBy: 'ingestion',
-                  source,
-                }),
-                metadata: JSON.stringify({ strategyId: strategy.id, autoTriggered: true }),
-                processed: false,
+            // Persist strategy result event via persistEvent
+            await persistEvent('whatomate:decisions', {
+              eventType: 'monitoring.alert_generated',
+              aggregateId: `strategy_${strategy.id}_${Date.now()}`,
+              aggregateType: 'alert',
+              payload: {
+                strategy: strategy.id,
+                action: result.action,
+                severity: result.severity,
+                confidence: result.confidence,
+                reasoning: result.reasoning,
+                triggeredBy: 'ingestion',
+                source,
               },
+              metadata: { strategyId: strategy.id, autoTriggered: true },
             });
           } catch (err) {
             console.error(`[Ingestion] Strategy ${strategy.id} auto-evaluation error:`, err);
@@ -309,7 +285,7 @@ export async function POST(request: Request) {
 }
 
 // ===== GET: Return ingestion stats from DB =====
-export async function GET() {
+async function _GET() {
   try {
     // Total messages by source
     const whatsappCount = await db.rawMessage.count({ where: { source: 'whatsapp' } });
@@ -382,3 +358,6 @@ export async function GET() {
     );
   }
 }
+
+export const POST = withAuth(_POST);
+export const GET = withAuth(_GET);

@@ -528,18 +528,43 @@ const predictiveStrategy: DecisionStrategyHandler = {
 
 // ===== STRATEGY 6: ADAPTIVE (Continuous Evolution) =====
 /**
- * Self-adjusting thresholds based on false-positive/negative feedback.
- * Adjusts sensitivity based on alert acknowledgment rates.
+ * Granular self-adjusting thresholds based on per-threshold false-positive/negative feedback.
+ *
+ * Key improvements over flat ±10% approach:
+ * 1. Per-threshold FPR analysis — each threshold is evaluated independently
+ * 2. Adaptive adjustment % — scaled by FPR (min 5%, max 15%)
+ * 3. Threshold-specific bounds from metadata — prevents runaway adjustments
+ * 4. Cooldown period (1 hour) — prevents oscillation on recently-triggered thresholds
+ * 5. Detailed audit trail — every adjustment recorded with reason, direction, and bounds
  */
+
+/** Detail record for a single threshold's adjustment analysis */
+interface ThresholdAdjustmentDetail {
+  thresholdId: string;
+  thresholdName: string;
+  oldValue: number;
+  newValue: number;
+  adjustmentPct: number;
+  direction: 'increase' | 'decrease';
+  fpr: number;
+  sensitivity: number;
+  reason: string;
+  skipped: boolean;
+  skipReason?: 'cooldown' | 'no_data' | 'within_range' | 'at_bound';
+  boundMin: number;
+  boundMax: number;
+}
+
 const adaptiveStrategy: DecisionStrategyHandler = {
   id: 'adaptive',
   name: 'Adaptativa (Evolución Continua)',
-  description: 'Auto-ajuste de umbrales basado en retroalimentación de falsos positivos/negativos',
+  description: 'Auto-ajuste granular por umbral basado en retroalimentación de falsos positivos/negativos con límites específicos y periodo de enfriamiento',
   async evaluate(ctx: StrategyContext): Promise<StrategyResult> {
-    // Get recent alert acknowledgment data for adaptive learning
     const now = new Date();
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
 
+    // ── System-wide metrics (for overall reporting) ──────────────────────
     const recentAlerts = await db.alert.findMany({
       where: { timestamp: { gte: thirtyDaysAgo } },
     });
@@ -547,83 +572,312 @@ const adaptiveStrategy: DecisionStrategyHandler = {
     const totalAlerts = recentAlerts.length;
     const acknowledged = recentAlerts.filter(a => a.acknowledged).length;
     const escalated = recentAlerts.filter(a => a.escalated).length;
-
-    // Calculate current performance metrics
     const acknowledgmentRate = totalAlerts > 0 ? acknowledged / totalAlerts : 0;
     const escalationRate = totalAlerts > 0 ? escalated / totalAlerts : 0;
 
-    // Estimate false positive rate: alerts acknowledged but not escalated are likely valid
-    // Unacknowledged alerts that aren't escalated might be false positives
     const possibleFalsePositives = totalAlerts - acknowledged - escalated;
-    const falsePositiveRate = totalAlerts > 0 ? Math.max(0, possibleFalsePositives / totalAlerts * 100) : 0;
-    const sensitivity = Math.min(100, acknowledgmentRate * 100 + escalationRate * 50);
-    const accuracy = Math.min(100, (1 - falsePositiveRate / 100) * 100);
+    const systemFPR = totalAlerts > 0 ? Math.max(0, possibleFalsePositives / totalAlerts * 100) : 0;
+    const systemSensitivity = Math.min(100, acknowledgmentRate * 100 + escalationRate * 50);
+    const systemAccuracy = Math.min(100, (1 - systemFPR / 100) * 100);
 
-    // Record adaptive metric
+    // ── Per-threshold granular analysis ──────────────────────────────────
+    const adjustmentDetails: ThresholdAdjustmentDetail[] = [];
+
+    for (const threshold of ctx.thresholds) {
+      // ── Cooldown check: skip if last triggered < 1 hour ago ──────────
+      if (threshold.lastTriggered && threshold.lastTriggered >= oneHourAgo) {
+        adjustmentDetails.push({
+          thresholdId: threshold.id,
+          thresholdName: threshold.name,
+          oldValue: threshold.value,
+          newValue: threshold.value,
+          adjustmentPct: 0,
+          direction: 'increase',
+          fpr: 0,
+          sensitivity: 0,
+          reason: `En enfriamiento: disparado hace ${Math.round((now.getTime() - threshold.lastTriggered.getTime()) / 60000)} min (< 60 min requeridos)`,
+          skipped: true,
+          skipReason: 'cooldown',
+          boundMin: 0,
+          boundMax: 0,
+        });
+        continue;
+      }
+
+      // ── Per-threshold alert analysis ──────────────────────────────────
+      const thresholdAlerts = await db.alert.findMany({
+        where: { thresholdId: threshold.id, timestamp: { gte: thirtyDaysAgo } },
+      });
+
+      const thresholdTotal = thresholdAlerts.length;
+
+      // No data — cannot compute FPR
+      if (thresholdTotal === 0) {
+        adjustmentDetails.push({
+          thresholdId: threshold.id,
+          thresholdName: threshold.name,
+          oldValue: threshold.value,
+          newValue: threshold.value,
+          adjustmentPct: 0,
+          direction: 'increase',
+          fpr: 0,
+          sensitivity: 0,
+          reason: 'Sin alertas en los últimos 30 días para este umbral',
+          skipped: true,
+          skipReason: 'no_data',
+          boundMin: 0,
+          boundMax: 0,
+        });
+        continue;
+      }
+
+      // Compute per-threshold FPR: (unacknowledged + unescalated) / total
+      const thresholdAcknowledged = thresholdAlerts.filter(a => a.acknowledged).length;
+      const thresholdEscalated = thresholdAlerts.filter(a => a.escalated).length;
+      const thresholdUnacked = thresholdTotal - thresholdAcknowledged - thresholdEscalated;
+      const thresholdFPR = (thresholdUnacked / thresholdTotal) * 100;
+
+      // Compute per-threshold sensitivity
+      const thresholdSensitivity = Math.min(
+        100,
+        (thresholdAcknowledged / thresholdTotal) * 100 +
+          (thresholdEscalated / thresholdTotal) * 50,
+      );
+
+      // ── Determine if adjustment is needed ─────────────────────────────
+      let shouldAdjust = false;
+      let direction: 'increase' | 'decrease' = 'increase';
+      let reason = '';
+
+      if (thresholdFPR > 20) {
+        // High FPR → increase threshold value (make it less sensitive)
+        shouldAdjust = true;
+        direction = 'increase';
+        reason = `FPR ${thresholdFPR.toFixed(1)}% > 20%: umbral demasiado sensible, subiendo valor`;
+      } else if (thresholdFPR < 5 && thresholdSensitivity < 70) {
+        // Low FPR + low sensitivity → decrease threshold value (make it more sensitive)
+        shouldAdjust = true;
+        direction = 'decrease';
+        reason = `FPR ${thresholdFPR.toFixed(1)}% < 5% y sensibilidad ${thresholdSensitivity.toFixed(1)}% < 70%: umbral demasiado insensible, bajando valor`;
+      } else {
+        adjustmentDetails.push({
+          thresholdId: threshold.id,
+          thresholdName: threshold.name,
+          oldValue: threshold.value,
+          newValue: threshold.value,
+          adjustmentPct: 0,
+          direction: 'increase',
+          fpr: thresholdFPR,
+          sensitivity: thresholdSensitivity,
+          reason: `FPR ${thresholdFPR.toFixed(1)}% dentro de rango aceptable (5%-20%), sin ajuste necesario`,
+          skipped: true,
+          skipReason: 'within_range',
+          boundMin: 0,
+          boundMax: 0,
+        });
+        continue;
+      }
+
+      if (!shouldAdjust) continue;
+
+      // ── Adaptive adjustment percentage ─────────────────────────────────
+      // Adjustment = min(15%, max(5%, FPR * 0.5))
+      const adjustmentPct = Math.min(15, Math.max(5, thresholdFPR * 0.5));
+
+      // ── Threshold-specific bounds from metadata ────────────────────────
+      // Fetch metadata from DB (ThresholdConfig may carry metadata from Prisma)
+      let adaptiveBounds: { min: number; max: number } | undefined;
+      try {
+        const dbThreshold = await db.thresholdConfig.findUnique({
+          where: { id: threshold.id },
+          select: { metadata: true },
+        });
+        if (dbThreshold?.metadata) {
+          const parsed = JSON.parse(dbThreshold.metadata) as Record<string, unknown>;
+          if (parsed.adaptiveBounds && typeof parsed.adaptiveBounds === 'object') {
+            adaptiveBounds = parsed.adaptiveBounds as { min: number; max: number };
+          }
+        }
+      } catch {
+        // metadata unavailable or unparseable — use defaults below
+      }
+
+      // Also check the in-memory ThresholdConfig metadata
+      if (!adaptiveBounds && threshold.metadata?.adaptiveBounds) {
+        adaptiveBounds = threshold.metadata.adaptiveBounds;
+      }
+
+      // Default bounds: min = value * 0.5, max = value * 2.0
+      const boundMin = adaptiveBounds?.min ?? threshold.value * 0.5;
+      const boundMax = adaptiveBounds?.max ?? threshold.value * 2.0;
+
+      // ── Apply adjustment ───────────────────────────────────────────────
+      const multiplier = direction === 'increase'
+        ? 1 + adjustmentPct / 100
+        : 1 - adjustmentPct / 100;
+
+      let newValue = Math.round(threshold.value * multiplier * 100) / 100;
+
+      // Enforce bounds
+      let clamped = false;
+      if (newValue < boundMin) {
+        newValue = boundMin;
+        clamped = true;
+        reason += ` (limitado a mínimo ${boundMin})`;
+      } else if (newValue > boundMax) {
+        newValue = boundMax;
+        clamped = true;
+        reason += ` (limitado a máximo ${boundMax})`;
+      }
+
+      // Skip if adjustment would result in no effective change (already at bound)
+      if (newValue === threshold.value) {
+        adjustmentDetails.push({
+          thresholdId: threshold.id,
+          thresholdName: threshold.name,
+          oldValue: threshold.value,
+          newValue: threshold.value,
+          adjustmentPct,
+          direction,
+          fpr: thresholdFPR,
+          sensitivity: thresholdSensitivity,
+          reason: reason + ' — ajuste sin efecto (en límite)',
+          skipped: true,
+          skipReason: 'at_bound',
+          boundMin,
+          boundMax,
+        });
+        continue;
+      }
+
+      // Persist the adjustment
+      await db.thresholdConfig.update({
+        where: { id: threshold.id },
+        data: { value: newValue },
+      });
+
+      if (clamped) {
+        reason += ` → ${newValue}`;
+      }
+
+      adjustmentDetails.push({
+        thresholdId: threshold.id,
+        thresholdName: threshold.name,
+        oldValue: threshold.value,
+        newValue,
+        adjustmentPct,
+        direction,
+        fpr: thresholdFPR,
+        sensitivity: thresholdSensitivity,
+        reason,
+        skipped: false,
+        boundMin,
+        boundMax,
+      });
+    }
+
+    // ── Categorize results ───────────────────────────────────────────────
+    const adjustedThresholds = adjustmentDetails.filter(d => !d.skipped);
+    const skippedThresholds = adjustmentDetails.filter(d => d.skipped);
+    const adjustmentMade = adjustedThresholds.length > 0;
+
+    // ── Record detailed adaptive metric for auditability ─────────────────
     await db.adaptiveMetric.create({
       data: {
         date: now,
-        falsePositiveRate,
-        sensitivity,
-        accuracy,
-        threshold: 'system',
+        falsePositiveRate: systemFPR,
+        sensitivity: systemSensitivity,
+        accuracy: systemAccuracy,
+        threshold: 'granular',
         adjustment: JSON.stringify({
-          acknowledgmentRate,
-          escalationRate,
-          totalAlerts,
-          action: falsePositiveRate > 15 ? 'increase_thresholds' : falsePositiveRate < 5 ? 'decrease_thresholds' : 'maintain',
+          systemMetrics: {
+            falsePositiveRate: systemFPR,
+            sensitivity: systemSensitivity,
+            accuracy: systemAccuracy,
+            acknowledgmentRate,
+            escalationRate,
+            totalAlerts,
+          },
+          adjustments: adjustedThresholds.map(d => ({
+            thresholdId: d.thresholdId,
+            thresholdName: d.thresholdName,
+            oldValue: d.oldValue,
+            newValue: d.newValue,
+            adjustmentPct: d.adjustmentPct,
+            direction: d.direction,
+            fpr: d.fpr,
+            sensitivity: d.sensitivity,
+            boundMin: d.boundMin,
+            boundMax: d.boundMax,
+            reason: d.reason,
+          })),
+          skipped: skippedThresholds.map(d => ({
+            thresholdId: d.thresholdId,
+            thresholdName: d.thresholdName,
+            skipReason: d.skipReason,
+            fpr: d.fpr,
+          })),
         }),
       },
     });
 
-    // Adaptive threshold adjustment
-    let adjustmentMade = false;
-    const adjustmentReasoning: string[] = [];
-
-    if (falsePositiveRate > 15) {
-      // Too many false positives → increase thresholds (make them less sensitive)
-      for (const threshold of ctx.thresholds) {
-        const newValue = Math.round(threshold.value * 1.1); // Increase by 10%
-        await db.thresholdConfig.update({
-          where: { id: threshold.id },
-          data: { value: newValue },
-        });
-        adjustmentMade = true;
-        adjustmentReasoning.push(`${threshold.name}: ${threshold.value} → ${newValue} (+10%)`);
-      }
-    } else if (falsePositiveRate < 5 && sensitivity < 80) {
-      // Too few false positives but missing real threats → decrease thresholds
-      for (const threshold of ctx.thresholds) {
-        const newValue = Math.round(threshold.value * 0.9); // Decrease by 10%
-        await db.thresholdConfig.update({
-          where: { id: threshold.id },
-          data: { value: newValue },
-        });
-        adjustmentMade = true;
-        adjustmentReasoning.push(`${threshold.name}: ${threshold.value} → ${newValue} (-10%)`);
-      }
-    }
-
-    // Emit adaptive event
+    // ── Emit adaptive event ──────────────────────────────────────────────
     await eventStore.append('whatomate:decisions', {
       eventType: 'adaptive.threshold_adjusted',
-      aggregateId: `adaptive_${Date.now()}`,
+      aggregateId: `adaptive_granular_${Date.now()}`,
       aggregateType: 'threshold',
       payload: {
-        falsePositiveRate,
-        sensitivity,
-        accuracy,
+        systemFPR,
+        systemSensitivity,
+        systemAccuracy,
         adjustmentMade,
-        adjustments: adjustmentReasoning,
+        adjustedCount: adjustedThresholds.length,
+        skippedCount: skippedThresholds.length,
+        adjustments: adjustedThresholds.map(d => ({
+          thresholdId: d.thresholdId,
+          name: d.thresholdName,
+          oldValue: d.oldValue,
+          newValue: d.newValue,
+          direction: d.direction,
+          pct: d.adjustmentPct,
+          fpr: d.fpr,
+          sensitivity: d.sensitivity,
+          boundMin: d.boundMin,
+          boundMax: d.boundMax,
+        })),
       },
     });
+
+    // ── Build result ─────────────────────────────────────────────────────
+    const adjustmentSummary = adjustedThresholds.length > 0
+      ? adjustedThresholds.map(d =>
+          `${d.thresholdName}: ${d.oldValue} → ${d.newValue} (${d.direction === 'increase' ? '+' : '-'}${d.adjustmentPct.toFixed(1)}%, FPR: ${d.fpr.toFixed(1)}%, límites: [${d.boundMin}, ${d.boundMax}])`,
+        ).join('; ')
+      : 'Sin ajustes necesarios';
+
+    const cooldownCount = skippedThresholds.filter(s => s.skipReason === 'cooldown').length;
+    const noDataCount = skippedThresholds.filter(s => s.skipReason === 'no_data').length;
+    const withinRangeCount = skippedThresholds.filter(s => s.skipReason === 'within_range').length;
+    const atBoundCount = skippedThresholds.filter(s => s.skipReason === 'at_bound').length;
 
     return {
       action: adjustmentMade ? 'alert' : 'monitor',
       severity: 'INFO',
-      confidence: accuracy,
-      reasoning: `FP Rate: ${falsePositiveRate.toFixed(1)}%, Sensibilidad: ${sensitivity.toFixed(1)}%, Precisión: ${accuracy.toFixed(1)}%. ${adjustmentMade ? `Ajustes: ${adjustmentReasoning.join('; ')}` : 'Sin ajustes necesarios'}`,
-      data: { falsePositiveRate, sensitivity, accuracy, adjustments: adjustmentReasoning },
+      confidence: systemAccuracy,
+      reasoning: [
+        `Sistema — FPR: ${systemFPR.toFixed(1)}%, Sensibilidad: ${systemSensitivity.toFixed(1)}%, Precisión: ${systemAccuracy.toFixed(1)}%`,
+        `Umbrales — ${adjustedThresholds.length} ajustados, ${skippedThresholds.length} omitidos (enfriamiento: ${cooldownCount}, sin datos: ${noDataCount}, en rango: ${withinRangeCount}, en límite: ${atBoundCount})`,
+        adjustmentSummary,
+      ].join('. '),
+      data: {
+        falsePositiveRate: systemFPR,
+        sensitivity: systemSensitivity,
+        accuracy: systemAccuracy,
+        adjustedCount: adjustedThresholds.length,
+        skippedCount: skippedThresholds.length,
+        adjustments: adjustedThresholds,
+        skipped: skippedThresholds,
+      },
     };
   },
 };

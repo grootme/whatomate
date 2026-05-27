@@ -37,14 +37,14 @@ const chartConfig = {
 } satisfies ChartConfig;
 
 interface DashboardStats {
-  totalContacts: number;
-  activeConversations: number;
-  messagesSent: number;
-  templates: number;
-  contactGrowth: number;
-  conversationGrowth: number;
+  totalEntities: number;
+  activeAlerts: number;
+  totalMessages: number;
+  activePatterns: number;
+  entityGrowth: number;
+  alertGrowth: number;
   messageGrowth: number;
-  templateGrowth: number;
+  patternGrowth: number;
 }
 
 interface WeeklyAnalytics {
@@ -53,7 +53,7 @@ interface WeeklyAnalytics {
   received: number;
 }
 
-interface RecentConversation {
+interface RecentActivity {
   id: string;
   contactName: string;
   lastMessage: string;
@@ -65,7 +65,7 @@ interface RecentConversation {
 export function DashboardView() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [weeklyAnalytics, setWeeklyAnalytics] = useState<WeeklyAnalytics[]>([]);
-  const [recentConversations, setRecentConversations] = useState<RecentConversation[]>([]);
+  const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -74,7 +74,7 @@ export function DashboardView() {
       .then((data) => {
         setStats(data.stats);
         setWeeklyAnalytics(data.weeklyAnalytics || []);
-        setRecentConversations(data.recentConversations || []);
+        setRecentActivity(data.recentActivity || []);
       })
       .catch(console.error)
       .finally(() => setLoading(false));
@@ -83,34 +83,34 @@ export function DashboardView() {
   const statCards = stats
     ? [
         {
-          title: 'Total Contacts',
-          value: stats.totalContacts.toLocaleString(),
-          change: `${stats.contactGrowth >= 0 ? '+' : ''}${stats.contactGrowth}%`,
-          trend: stats.contactGrowth >= 0 ? ('up' as const) : ('down' as const),
+          title: 'Total Entities',
+          value: stats.totalEntities.toLocaleString(),
+          change: `${stats.entityGrowth >= 0 ? '+' : ''}${stats.entityGrowth}%`,
+          trend: stats.entityGrowth >= 0 ? ('up' as const) : ('down' as const),
           icon: Users,
           color: 'bg-[#25D366]/10 text-[#25D366]',
         },
         {
-          title: 'Active Conversations',
-          value: stats.activeConversations.toLocaleString(),
-          change: `${stats.conversationGrowth >= 0 ? '+' : ''}${stats.conversationGrowth}%`,
-          trend: stats.conversationGrowth >= 0 ? ('up' as const) : ('down' as const),
+          title: 'Active Alerts',
+          value: stats.activeAlerts.toLocaleString(),
+          change: `${stats.alertGrowth >= 0 ? '+' : ''}${stats.alertGrowth}%`,
+          trend: stats.alertGrowth >= 0 ? ('up' as const) : ('down' as const),
           icon: MessageSquare,
-          color: 'bg-blue-500/10 text-blue-500',
+          color: 'bg-red-500/10 text-red-500',
         },
         {
-          title: 'Messages Sent',
-          value: stats.messagesSent.toLocaleString(),
+          title: 'Total Messages',
+          value: stats.totalMessages.toLocaleString(),
           change: `${stats.messageGrowth >= 0 ? '+' : ''}${stats.messageGrowth}%`,
           trend: stats.messageGrowth >= 0 ? ('up' as const) : ('down' as const),
           icon: Send,
           color: 'bg-orange-500/10 text-orange-500',
         },
         {
-          title: 'Templates',
-          value: stats.templates.toString(),
-          change: `${stats.templateGrowth >= 0 ? '+' : ''}${stats.templateGrowth}%`,
-          trend: stats.templateGrowth >= 0 ? ('up' as const) : ('down' as const),
+          title: 'Active Patterns',
+          value: stats.activePatterns.toString(),
+          change: `${stats.patternGrowth >= 0 ? '+' : ''}${stats.patternGrowth}%`,
+          trend: stats.patternGrowth >= 0 ? ('up' as const) : ('down' as const),
           icon: FileText,
           color: 'bg-purple-500/10 text-purple-500',
         },
@@ -224,20 +224,20 @@ export function DashboardView() {
         </Card>
       </div>
 
-      {/* Recent Conversations */}
+      {/* Recent Activity */}
       <Card className="border-0 shadow-sm">
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
-            <CardTitle className="text-base">Recent Conversations</CardTitle>
+            <CardTitle className="text-base">Recent Activity</CardTitle>
             <Button variant="ghost" size="sm" className="text-[#25D366] hover:text-[#128C7E]">
               View all <ArrowRight className="w-4 h-4 ml-1" />
             </Button>
           </div>
         </CardHeader>
         <CardContent>
-          {recentConversations.length > 0 ? (
+          {recentActivity.length > 0 ? (
             <div className="space-y-1">
-              {recentConversations.map((conv) => (
+              {recentActivity.map((conv) => (
                 <div
                   key={conv.id}
                   className="flex items-center gap-3 p-3 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
@@ -283,7 +283,7 @@ export function DashboardView() {
             </div>
           ) : (
             <div className="py-8 text-center text-muted-foreground text-sm">
-              No conversations yet. Data will appear once messages are ingested.
+              No activity yet. Data will appear once messages are ingested.
             </div>
           )}
         </CardContent>

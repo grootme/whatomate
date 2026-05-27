@@ -89,6 +89,24 @@ async function main() {
   }
   console.log(`  ✅ ${patterns.length} pattern detections seeded`);
 
+  // ===== RISK DIMENSIONS =====
+  const riskDimensions = [
+    { name: 'Naturaleza', weight: 35, description: 'Tipo y gravedad de la actividad detectada', color: '#EF4444' },
+    { name: 'Volumen', weight: 25, description: 'Cantidad de eventos y mensajes relacionados', color: '#F59E0B' },
+    { name: 'Conexiones', weight: 20, description: 'Vínculos entre entidades y redes identificadas', color: '#10B981' },
+    { name: 'Contexto OSINT', weight: 15, description: 'Corroboración con fuentes de inteligencia abierta', color: '#06B6D4' },
+    { name: 'Recencia', weight: 5, description: 'Temporalidad y frescura de los datos', color: '#8B5CF6' },
+  ];
+
+  for (const dim of riskDimensions) {
+    await prisma.riskDimension.upsert({
+      where: { name: dim.name },
+      update: { weight: dim.weight, description: dim.description, color: dim.color },
+      create: dim,
+    });
+  }
+  console.log(`  ✅ ${riskDimensions.length} risk dimensions seeded`);
+
   console.log('\n🎉 Intelligence database seeded successfully!');
 }
 

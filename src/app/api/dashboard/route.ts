@@ -60,6 +60,16 @@ export async function GET() {
       db.rawMessage.count({ where: { timestamp: { gte: sixtyDaysAgo, lt: thirtyDaysAgo } } }),
     ]);
 
+    const [currentPeriodAlerts, previousPeriodAlerts] = await Promise.all([
+      db.alert.count({ where: { timestamp: { gte: thirtyDaysAgo } } }),
+      db.alert.count({ where: { timestamp: { gte: sixtyDaysAgo, lt: thirtyDaysAgo } } }),
+    ]);
+
+    const [currentPeriodPatterns, previousPeriodPatterns] = await Promise.all([
+      db.patternDetection.count({ where: { createdAt: { gte: thirtyDaysAgo } } }),
+      db.patternDetection.count({ where: { createdAt: { gte: sixtyDaysAgo, lt: thirtyDaysAgo } } }),
+    ]);
+
     const entityGrowth =
       previousPeriodEntities > 0
         ? Number((((currentPeriodEntities - previousPeriodEntities) / previousPeriodEntities) * 100).toFixed(1))
@@ -70,7 +80,17 @@ export async function GET() {
         ? Number((((currentPeriodMessages - previousPeriodMessages) / previousPeriodMessages) * 100).toFixed(1))
         : 0;
 
-    // Recent conversations - use recent raw messages as proxy
+    const alertGrowth =
+      previousPeriodAlerts > 0
+        ? Number((((currentPeriodAlerts - previousPeriodAlerts) / previousPeriodAlerts) * 100).toFixed(1))
+        : 0;
+
+    const patternGrowth =
+      previousPeriodPatterns > 0
+        ? Number((((currentPeriodPatterns - previousPeriodPatterns) / previousPeriodPatterns) * 100).toFixed(1))
+        : 0;
+
+    // Recent activity — use recent raw messages as proxy
     const recentMessages = await db.rawMessage.findMany({
       where: { senderName: { not: null } },
       orderBy: { timestamp: 'desc' },
@@ -78,7 +98,7 @@ export async function GET() {
       distinct: ['senderId'],
     });
 
-    const recentConversations = recentMessages.map((msg) => ({
+    const recentActivity = recentMessages.map((msg) => ({
       id: msg.id,
       contactName: msg.senderName || 'Unknown',
       lastMessage: msg.content.substring(0, 60),
@@ -116,36 +136,36 @@ export async function GET() {
 
     return NextResponse.json({
       stats: {
-        totalContacts: totalEntities,
-        activeConversations: activeAlerts,
-        messagesSent: totalMessages,
-        templates: totalPatterns,
-        contactGrowth: entityGrowth,
-        conversationGrowth: 0,
+        totalEntities,
+        activeAlerts,
+        totalMessages,
+        activePatterns: totalPatterns,
+        entityGrowth,
+        alertGrowth,
         messageGrowth,
-        templateGrowth: 0,
+        patternGrowth,
       },
       weeklyAnalytics,
       monthlyAnalytics,
-      recentConversations,
+      recentActivity,
     });
   } catch (error) {
     console.error('Dashboard API error:', error);
     return NextResponse.json(
       {
         stats: {
-          totalContacts: 0,
-          activeConversations: 0,
-          messagesSent: 0,
-          templates: 0,
-          contactGrowth: 0,
-          conversationGrowth: 0,
+          totalEntities: 0,
+          activeAlerts: 0,
+          totalMessages: 0,
+          activePatterns: 0,
+          entityGrowth: 0,
+          alertGrowth: 0,
           messageGrowth: 0,
-          templateGrowth: 0,
+          patternGrowth: 0,
         },
         weeklyAnalytics: [],
         monthlyAnalytics: [],
-        recentConversations: [],
+        recentActivity: [],
       },
       { status: 500 }
     );
