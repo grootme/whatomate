@@ -635,7 +635,7 @@ type ConsensusAgent struct {
         ID         string
         Name       string
         Weight     float64 // Reputation-based weight
-        Role       string  // "analyst", "investigator", "supervisor", "auditor"
+        Role       string  // "osint", "sigint", "humint", "predictive"
 }
 
 // ConsensusStrategy implements multi-agent voting for decision making
@@ -646,17 +646,17 @@ type ConsensusStrategy struct {
         analysisEng *AnalysisEngine // Shared analysis engine for keyword detection
 }
 
-// NewConsensusStrategy creates a new ConsensusStrategy with default agents
+// NewConsensusStrategy creates a new ConsensusStrategy with spec-aligned agents
 func NewConsensusStrategy(es *EventStore, log logf.Logger) *ConsensusStrategy {
         return &ConsensusStrategy{
                 eventStore:  es,
                 log:         log,
                 analysisEng: NewAnalysisEngine(es, log),
                 agents: []ConsensusAgent{
-                        {ID: "agent-analyst", Name: "Analyst Agent", Weight: 1.0, Role: "analyst"},
-                        {ID: "agent-investigator", Name: "Investigator Agent", Weight: 1.2, Role: "investigator"},
-                        {ID: "agent-supervisor", Name: "Supervisor Agent", Weight: 1.5, Role: "supervisor"},
-                        {ID: "agent-auditor", Name: "Auditor Agent", Weight: 0.8, Role: "auditor"},
+                        {ID: "agent-osint", Name: "OSINT Agent", Weight: 1.0, Role: "osint"},
+                        {ID: "agent-sigint", Name: "SIGINT Agent", Weight: 1.2, Role: "sigint"},
+                        {ID: "agent-humint", Name: "HUMINT Agent", Weight: 1.5, Role: "humint"},
+                        {ID: "agent-predictive", Name: "Predictive Agent", Weight: 0.8, Role: "predictive"},
                 },
         }
 }
@@ -709,7 +709,11 @@ func (cs *ConsensusStrategy) Evaluate(ctx StrategyContext) (*StrategyResult, err
                 }
         }
 
-        // Determine consensus
+        // Determine consensus per spec:
+        // 4/4 agreement → auto-execute
+        // 3/4 agreement → auto-execute + notify human
+        // 2/4 agreement → require human approval
+        // 1/4 agreement → false positive
         action := "dismiss"
         severity := "INFO"
         confidence := 50
@@ -717,20 +721,20 @@ func (cs *ConsensusStrategy) Evaluate(ctx StrategyContext) (*StrategyResult, err
 
         switch favorCount {
         case 4: // 4/4 unanimous
-                action = "alert"
-                severity = "ALTA"
+                action = "auto_execute"
+                severity = "CRÍTICA"
                 confidence = 95
-                reasoning = "Unanimous consensus (4/4): automatic action"
+                reasoning = "Unanimous consensus (4/4): auto-execute"
         case 3: // 3/4 supermajority
-                action = "alert"
-                severity = "MEDIA"
+                action = "auto_execute_notify"
+                severity = "ALTA"
                 confidence = 80
-                reasoning = "Supermajority consensus (3/4): automatic action with notification"
+                reasoning = "Supermajority consensus (3/4): auto-execute + notify human"
         case 2: // 2/4 simple majority
-                action = "monitor"
+                action = "require_approval"
                 severity = "MEDIA"
                 confidence = 60
-                reasoning = "Simple majority (2/4): requires human review"
+                reasoning = "Simple majority (2/4): requires human approval"
         case 1: // 1/4 minority
                 action = "dismiss"
                 severity = "INFO"
@@ -740,7 +744,7 @@ func (cs *ConsensusStrategy) Evaluate(ctx StrategyContext) (*StrategyResult, err
                 action = "dismiss"
                 severity = "INFO"
                 confidence = 20
-                reasoning = "No support (0/4): dismissed"
+                reasoning = "No support (0/4): dismissed as false positive"
         }
 
         // Factor in weighted scores
@@ -764,16 +768,85 @@ func (cs *ConsensusStrategy) Evaluate(ctx StrategyContext) (*StrategyResult, err
         }, nil
 }
 
-// agentVote simulates an individual agent's vote
+// agentVote simulates an individual agent's vote based on its domain expertise
 func (cs *ConsensusStrategy) agentVote(agent ConsensusAgent, ctx StrategyContext) ConsensusVote {
-        // Each agent uses different criteria to vote
+        // Each agent uses different criteria based on its intelligence discipline
         var vote string
         confidence := 50
         reasoning := ""
 
         switch agent.Role {
-        case "analyst":
-                // Analyst focuses on message patterns and keywords
+        case "osint":
+                // OSINT Agent focuses on open-source intelligence: GPS jamming, UAVs,
+                // LiveUAMap events, SIGINT data, and other OSINT indicators
+                threatScore := 0
+                if ctx.OSINTData != nil {
+                        threatScore += len(ctx.OSINTData.GPSJamming) * 5
+                        threatScore += len(ctx.OSINTData.UAVs) * 3
+                        threatScore += len(ctx.OSINTData.LiveUAMap) * 4
+                        threatScore += len(ctx.OSINTData.SIGINT) * 5
+                        threatScore += len(ctx.OSINTData.Fires) * 2
+                        threatScore += len(ctx.OSINTData.GDELT) * 2
+                }
+                if ctx.OSINTData != nil && ctx.OSINTData.Weather != nil && ctx.OSINTData.Weather.ActiveAlerts > 0 {
+                        threatScore += ctx.OSINTData.Weather.ActiveAlerts * 3
+                }
+
+                if threatScore >= 30 {
+                        vote = "favor"
+                        confidence = min(60+threatScore, 95)
+                        reasoning = fmt.Sprintf("OSINT: High threat score (%d) from open-source indicators", threatScore)
+                } else if threatScore >= 10 {
+                        vote = "abstencion"
+                        confidence = 50
+                        reasoning = fmt.Sprintf("OSINT: Moderate threat score (%d) from open-source data", threatScore)
+                } else {
+                        vote = "contra"
+                        confidence = 60
+                        reasoning = "OSINT: No significant open-source threat indicators"
+                }
+
+        case "sigint":
+                // SIGINT Agent focuses on signal intelligence: communications patterns,
+                // frequency analysis, cross-platform message volume and anomalies
+                sigScore := 0
+                if ctx.OSINTData != nil {
+                        sigScore += len(ctx.OSINTData.SIGINT) * 8
+                }
+                // Analyze message volume anomalies and cross-platform patterns
+                crossPlatform := 0
+                for _, e := range ctx.Entities {
+                        if len(e.Sources) >= 2 {
+                                crossPlatform++
+                        }
+                }
+                sigScore += crossPlatform * 5
+
+                // Check for communication pattern anomalies
+                msgCount := len(ctx.Messages)
+                if msgCount > 50 {
+                        sigScore += 10
+                } else if msgCount > 20 {
+                        sigScore += 5
+                }
+
+                if sigScore >= 20 {
+                        vote = "favor"
+                        confidence = min(55+sigScore, 90)
+                        reasoning = fmt.Sprintf("SIGINT: Signal intelligence indicators detected (score %d, %d cross-platform entities, %d messages)", sigScore, crossPlatform, msgCount)
+                } else if sigScore >= 8 {
+                        vote = "abstencion"
+                        confidence = 50
+                        reasoning = fmt.Sprintf("SIGINT: Some signal indicators (score %d), insufficient for confirmation", sigScore)
+                } else {
+                        vote = "contra"
+                        confidence = 55
+                        reasoning = "SIGINT: No significant signal intelligence indicators"
+                }
+
+        case "humint":
+                // HUMINT Agent focuses on human intelligence: message content analysis,
+                // keyword detection, fraud indicators, and sender behavior patterns
                 riskIndicators := 0
                 for _, msg := range ctx.Messages {
                         if len(msg.Content) > 0 {
@@ -785,96 +858,59 @@ func (cs *ConsensusStrategy) agentVote(agent ConsensusAgent, ctx StrategyContext
                                 }
                         }
                 }
-                if riskIndicators >= 3 {
+                // Also consider entity risk levels
+                highRiskCount := 0
+                for _, e := range ctx.Entities {
+                        if e.RiskLevel == "high" || e.RiskLevel == "critical" {
+                                highRiskCount++
+                        }
+                }
+                riskIndicators += highRiskCount * 3
+
+                if riskIndicators >= 5 {
                         vote = "favor"
-                        confidence = 70 + min(riskIndicators*3, 25)
-                        reasoning = fmt.Sprintf("Analyst: %d risk indicators detected in messages", riskIndicators)
-                } else if riskIndicators >= 1 {
+                        confidence = 70 + min(riskIndicators*2, 25)
+                        reasoning = fmt.Sprintf("HUMINT: %d risk indicators from content analysis and %d high-risk entities", riskIndicators, highRiskCount)
+                } else if riskIndicators >= 2 {
                         vote = "abstencion"
                         confidence = 50
-                        reasoning = fmt.Sprintf("Analyst: Some risk indicators (%d) but below threshold", riskIndicators)
+                        reasoning = fmt.Sprintf("HUMINT: Some risk indicators (%d) but below threshold", riskIndicators)
                 } else {
                         vote = "contra"
                         confidence = 60
-                        reasoning = "Analyst: No significant risk indicators in messages"
+                        reasoning = "HUMINT: No significant risk indicators in content analysis"
                 }
 
-        case "investigator":
-                // Investigator focuses on entity connections and cross-platform activity
-                crossPlatform := 0
-                for _, e := range ctx.Entities {
-                        if len(e.Sources) >= 2 {
-                                crossPlatform++
+        case "predictive":
+                // Predictive Agent focuses on trend analysis and pattern forecasting:
+                // active patterns, their severity, and prediction models
+                activePatterns := 0
+                criticalPatterns := 0
+                for _, p := range ctx.Patterns {
+                        if p.Status == "active" {
+                                activePatterns++
+                                if p.Severity == "CRÍTICA" {
+                                        criticalPatterns++
+                                }
                         }
                 }
-                if crossPlatform >= 2 {
+
+                predictiveScore := activePatterns * 5 + criticalPatterns * 15
+                // Factor in entity volume as a trend indicator
+                predictiveScore += len(ctx.Entities)
+
+                if predictiveScore >= 25 {
                         vote = "favor"
-                        confidence = 65 + crossPlatform*5
-                        reasoning = fmt.Sprintf("Investigator: %d entities active across multiple platforms", crossPlatform)
-                } else if crossPlatform == 1 {
+                        confidence = min(55+predictiveScore, 92)
+                        reasoning = fmt.Sprintf("Predictive: Strong pattern indicators (%d active, %d critical), predictive score %d", activePatterns, criticalPatterns, predictiveScore)
+                } else if predictiveScore >= 10 {
                         vote = "abstencion"
-                        confidence = 45
-                        reasoning = "Investigator: Limited cross-platform activity"
+                        confidence = 50
+                        reasoning = fmt.Sprintf("Predictive: Moderate pattern indicators (score %d), uncertain trend", predictiveScore)
                 } else {
                         vote = "contra"
                         confidence = 55
-                        reasoning = "Investigator: No cross-platform entity activity"
-                }
-
-        case "supervisor":
-                // Supervisor looks at overall threat landscape and OSINT
-                threatLevel := 0
-                if ctx.OSINTData != nil {
-                        threatLevel += len(ctx.OSINTData.GPSJamming) * 5
-                        threatLevel += len(ctx.OSINTData.UAVs) * 3
-                        threatLevel += len(ctx.OSINTData.LiveUAMap) * 4
-                        threatLevel += len(ctx.OSINTData.SIGINT) * 5
-                }
-                activeCritical := 0
-                for _, p := range ctx.Patterns {
-                        if p.Severity == "CRÍTICA" && p.Status == "active" {
-                                activeCritical++
-                        }
-                }
-                threatLevel += activeCritical * 20
-
-                if threatLevel >= 30 {
-                        vote = "favor"
-                        confidence = min(60+threatLevel, 95)
-                        reasoning = fmt.Sprintf("Supervisor: High threat level (score %d), %d critical patterns", threatLevel, activeCritical)
-                } else if threatLevel >= 10 {
-                        vote = "abstencion"
-                        confidence = 50
-                        reasoning = fmt.Sprintf("Supervisor: Moderate threat level (score %d)", threatLevel)
-                } else {
-                        vote = "contra"
-                        confidence = 60
-                        reasoning = "Supervisor: Low threat level"
-                }
-
-        case "auditor":
-                // Auditor focuses on data quality and false positive rate
-                entityCount := len(ctx.Entities)
-                messageCount := len(ctx.Messages)
-                patternCount := len(ctx.Patterns)
-
-                // High data volume with few patterns = likely false positives
-                if entityCount > 0 && patternCount == 0 {
-                        vote = "contra"
-                        confidence = 70
-                        reasoning = "Auditor: Entities detected but no patterns, possible false positives"
-                } else if messageCount < 3 && patternCount > 0 {
-                        vote = "contra"
-                        confidence = 65
-                        reasoning = "Auditor: Patterns detected on insufficient data, likely false positives"
-                } else if patternCount > 0 && entityCount > 0 {
-                        vote = "favor"
-                        confidence = 60
-                        reasoning = "Auditor: Patterns and entities corroborate each other"
-                } else {
-                        vote = "abstencion"
-                        confidence = 40
-                        reasoning = "Auditor: Insufficient data for quality assessment"
+                        reasoning = "Predictive: No significant trend indicators detected"
                 }
         }
 
@@ -1067,34 +1103,51 @@ func (ps *PredictiveStrategy) holtWintersForecast(data []float64, alpha, beta, g
 
 // AdaptiveStrategy adjusts thresholds based on feedback to minimize false positives
 type AdaptiveStrategy struct {
-        eventStore       *EventStore
-        log              logf.Logger
-        falsePositiveLog map[string]int // metric -> false positive count
-        totalAlertLog    map[string]int // metric -> total alert count
-        adjustmentFactor float64        // How much to adjust thresholds (0.0-1.0)
-        mu               sync.RWMutex
+        eventStore         *EventStore
+        log                logf.Logger
+        thresholdStrategy  *ThresholdStrategy       // Reference to ThresholdStrategy for auto-apply
+        falsePositiveLog   map[string]int           // metric -> false positive count (per-threshold)
+        totalAlertLog      map[string]int           // metric -> total alert count (per-threshold)
+        originalThresholds map[string]float64       // metric -> original threshold value (for bounds)
+        lastAdjustment     map[string]time.Time     // metric -> last adjustment time (for cooldown)
+        cooldownPeriod     time.Duration            // Minimum time between adjustments for the same threshold
+        adjustmentFactor   float64                  // How much to adjust thresholds (0.0-1.0)
+        mu                 sync.RWMutex
 }
 
 // NewAdaptiveStrategy creates a new AdaptiveStrategy
-func NewAdaptiveStrategy(es *EventStore, log logf.Logger) *AdaptiveStrategy {
-        return &AdaptiveStrategy{
-                eventStore:       es,
-                log:              log,
-                falsePositiveLog: make(map[string]int),
-                totalAlertLog:    make(map[string]int),
-                adjustmentFactor: 0.1, // 10% adjustment per feedback cycle
+func NewAdaptiveStrategy(es *EventStore, ts *ThresholdStrategy, log logf.Logger) *AdaptiveStrategy {
+        as := &AdaptiveStrategy{
+                eventStore:         es,
+                log:                log,
+                thresholdStrategy:  ts,
+                falsePositiveLog:   make(map[string]int),
+                totalAlertLog:      make(map[string]int),
+                originalThresholds: make(map[string]float64),
+                lastAdjustment:     make(map[string]time.Time),
+                cooldownPeriod:     5 * time.Minute, // Don't adjust the same threshold more than once per 5 minutes
+                adjustmentFactor:   0.1,              // 10% adjustment per feedback cycle
         }
+
+        // Capture original threshold values for bounds enforcement
+        if ts != nil {
+                for _, th := range ts.GetThresholds() {
+                        as.originalThresholds[th.Metric] = th.Value
+                }
+        }
+
+        return as
 }
 
 func (as *AdaptiveStrategy) ID() string   { return "adaptive" }
 func (as *AdaptiveStrategy) Name() string { return "Adaptive Strategy" }
 
 func (as *AdaptiveStrategy) Evaluate(ctx StrategyContext) (*StrategyResult, error) {
-        // The adaptive strategy evaluates the current FPR and adjusts thresholds
-        as.mu.RLock()
-        defer as.mu.RUnlock()
+        // The adaptive strategy evaluates the current FPR and auto-applies threshold adjustments
+        as.mu.Lock()
+        defer as.mu.Unlock()
 
-        // Compute current FPR for each metric
+        // Compute current FPR for each metric (per-threshold granularity)
         fprByMetric := make(map[string]float64)
         for metric, totalAlerts := range as.totalAlertLog {
                 if totalAlerts > 0 {
@@ -1102,26 +1155,92 @@ func (as *AdaptiveStrategy) Evaluate(ctx StrategyContext) (*StrategyResult, erro
                 }
         }
 
-        // Determine if any adjustments are needed
+        // Determine if any adjustments are needed and auto-apply them
         adjustmentsNeeded := 0
         adjustedMetrics := map[string]interface{}{}
+        now := time.Now()
 
         for metric, fpr := range fprByMetric {
+                var direction string // "increase" or "decrease"
+                var adjustmentPct float64
+
                 if fpr > 0.3 { // FPR too high - need to raise thresholds
-                        adjustmentsNeeded++
-                        adjustedMetrics[metric] = map[string]interface{}{
-                                "currentFPR":     fpr,
-                                "action":         "increase_threshold",
-                                "adjustment":     as.adjustmentFactor,
-                                "recommendation": fmt.Sprintf("Increase threshold by %.0f%% to reduce FPR from %.1f%%", as.adjustmentFactor*100, fpr*100),
-                        }
+                        direction = "increase"
+                        adjustmentPct = as.adjustmentFactor
                 } else if fpr > 0 && fpr < 0.05 { // FPR very low - might be missing true positives
+                        direction = "decrease"
+                        adjustmentPct = as.adjustmentFactor
+                } else {
+                        continue // FPR within acceptable range
+                }
+
+                // Check cooldown: don't adjust the same threshold more than once per 5-minute window
+                if lastAdj, ok := as.lastAdjustment[metric]; ok {
+                        if now.Sub(lastAdj) < as.cooldownPeriod {
+                                adjustedMetrics[metric] = map[string]interface{}{
+                                        "currentFPR": fpr,
+                                        "action":     direction + "_threshold",
+                                        "status":     "cooldown",
+                                        "reason":     fmt.Sprintf("Skipped: last adjusted %v ago, cooldown is %v", now.Sub(lastAdj).Round(time.Second), as.cooldownPeriod),
+                                }
+                                continue
+                        }
+                }
+
+                // Find the threshold ID for this metric
+                var thresholdID string
+                var currentValue float64
+                if as.thresholdStrategy != nil {
+                        for _, th := range as.thresholdStrategy.GetThresholds() {
+                                if th.Metric == metric {
+                                        thresholdID = th.ID
+                                        currentValue = th.Value
+                                        break
+                                }
+                        }
+                }
+
+                // Compute the new value
+                var newValue float64
+                if direction == "increase" {
+                        newValue = currentValue * (1.0 + adjustmentPct)
+                } else {
+                        newValue = currentValue * (1.0 - adjustmentPct)
+                }
+
+                // Enforce bounds: never adjust below 10% or above 90% of original value
+                if original, ok := as.originalThresholds[metric]; ok && original > 0 {
+                        lowerBound := original * 0.10
+                        upperBound := original * 0.90
+                        if newValue < lowerBound {
+                                newValue = lowerBound
+                        }
+                        if newValue > upperBound {
+                                newValue = upperBound
+                        }
+                }
+
+                // Auto-apply the adjustment to the ThresholdStrategy
+                if thresholdID != "" && as.thresholdStrategy != nil {
+                        as.thresholdStrategy.UpdateThreshold(thresholdID, newValue)
+                        as.lastAdjustment[metric] = now
                         adjustmentsNeeded++
+
                         adjustedMetrics[metric] = map[string]interface{}{
                                 "currentFPR":     fpr,
-                                "action":         "decrease_threshold",
-                                "adjustment":     as.adjustmentFactor,
-                                "recommendation": fmt.Sprintf("Consider decreasing threshold (FPR only %.1f%%, may miss true positives)", fpr*100),
+                                "action":         direction + "_threshold",
+                                "status":         "applied",
+                                "previousValue":  currentValue,
+                                "newValue":       newValue,
+                                "adjustmentPct":  adjustmentPct,
+                                "recommendation": fmt.Sprintf("Threshold %sd by %.0f%% (FPR: %.1f%%)", direction, adjustmentPct*100, fpr*100),
+                        }
+                } else {
+                        adjustedMetrics[metric] = map[string]interface{}{
+                                "currentFPR":     fpr,
+                                "action":         direction + "_threshold",
+                                "status":         "no_threshold_found",
+                                "recommendation": fmt.Sprintf("Cannot auto-apply: no threshold config found for metric '%s'", metric),
                         }
                 }
         }
@@ -1135,6 +1254,7 @@ func (as *AdaptiveStrategy) Evaluate(ctx StrategyContext) (*StrategyResult, erro
                         Payload: map[string]interface{}{
                                 "adjustments": adjustedMetrics,
                                 "fprByMetric": fprByMetric,
+                                "autoApplied": true,
                         },
                         Timestamp: time.Now(),
                 })
@@ -1143,7 +1263,7 @@ func (as *AdaptiveStrategy) Evaluate(ctx StrategyContext) (*StrategyResult, erro
                         Action:     "monitor",
                         Severity:   "INFO",
                         Confidence: 70,
-                        Reasoning:  fmt.Sprintf("Adaptive strategy: %d threshold adjustment(s) recommended based on FPR analysis", adjustmentsNeeded),
+                        Reasoning:  fmt.Sprintf("Adaptive strategy: %d threshold adjustment(s) auto-applied based on per-threshold FPR analysis", adjustmentsNeeded),
                         Data:       adjustedMetrics,
                 }, nil
         }

@@ -17,22 +17,23 @@ import (
 
 // IntelligenceService is the main facade that ties all intelligence components together
 type IntelligenceService struct {
-        eventStore  *EventStore
-        analysis    *AnalysisEngine
-        correlation *CorrelationEngine
-        strategies  *StrategyRegistry
-        monitoring  *MonitoringEngine
-        reports     *ReportGenerator
-        osintClient *OSINTClient
+        eventStore    *EventStore
+        analysis      *AnalysisEngine
+        correlation   *CorrelationEngine
+        correlationV2 *CorrelationEngineV2
+        strategies    *StrategyRegistry
+        monitoring    *MonitoringEngine
+        reports       *ReportGenerator
+        osintClient   *OSINTClient
 
         // New components
-        osintConsumer          *OSINTStreamConsumer
+        osintConsumer           *OSINTStreamConsumer
         telegramOSINTCorrelator *TelegramOSINTCorrelator
-        threatComputer        *ThreatLevelComputer
-        reportScheduler       *ReportScheduler
-        osintCache            *OSINTCache
-        alertNotifier         *AlertNotifier
-        healthAggregator      *HealthCheckAggregator
+        threatComputer          *ThreatLevelComputer
+        reportScheduler         *ReportScheduler
+        osintCache              *OSINTCache
+        alertNotifier           *AlertNotifier
+        healthAggregator        *HealthCheckAggregator
 
         db         *gorm.DB
         redis      *redis.Client
@@ -59,16 +60,20 @@ func NewIntelligenceService(db *gorm.DB, rdb *redis.Client, httpClient *http.Cli
         // Initialize correlation engine (DNA Layer 2)
         correlationEngine := NewCorrelationEngine(eventStore, log)
 
+        // Initialize correlation engine V2 (DNA Layer 2 - enhanced)
+        correlationEngineV2 := NewCorrelationEngineV2(eventStore, log)
+
         // Initialize strategy registry (DNA Layer 3)
         strategyRegistry := NewStrategyRegistry(log)
 
         // Register all 6 strategies
-        strategyRegistry.Register(NewThresholdStrategy(eventStore, log))
+        thresholdStrategy := NewThresholdStrategy(eventStore, log)
+        strategyRegistry.Register(thresholdStrategy)
         strategyRegistry.Register(NewPatternStrategy(eventStore, log))
         strategyRegistry.Register(NewRiskScoringStrategy(eventStore, log))
         strategyRegistry.Register(NewConsensusStrategy(eventStore, log))
         strategyRegistry.Register(NewPredictiveStrategy(eventStore, log))
-        strategyRegistry.Register(NewAdaptiveStrategy(eventStore, log))
+        strategyRegistry.Register(NewAdaptiveStrategy(eventStore, thresholdStrategy, log))
 
         // Initialize monitoring engine (DNA Layer 3)
         monitoringEngine := NewMonitoringEngine(eventStore, rdb, log)
@@ -80,13 +85,14 @@ func NewIntelligenceService(db *gorm.DB, rdb *redis.Client, httpClient *http.Cli
         osintClient := NewOSINTClient(httpClient, osintBaseURL, log)
 
         service := &IntelligenceService{
-                eventStore:  eventStore,
-                analysis:    analysisEngine,
-                correlation: correlationEngine,
-                strategies:  strategyRegistry,
-                monitoring:  monitoringEngine,
-                reports:     reportGenerator,
-                osintClient: osintClient,
+                eventStore:    eventStore,
+                analysis:      analysisEngine,
+                correlation:   correlationEngine,
+                correlationV2: correlationEngineV2,
+                strategies:    strategyRegistry,
+                monitoring:    monitoringEngine,
+                reports:       reportGenerator,
+                osintClient:   osintClient,
                 db:          db,
                 redis:       rdb,
                 log:         log,
@@ -303,6 +309,10 @@ func (is *IntelligenceService) RunAnalysis(ctx context.Context) ([]AnalysisResul
 
                         comentions := is.correlation.FindComentions(ctx, entities, allMessages)
                         is.log.Info("Co-mention analysis completed", "comentions", len(comentions))
+
+                        // Run V2 multi-method correlation for enhanced results
+                        enhancedCorrelations := is.correlationV2.Correlate(ctx, entities, allMessages)
+                        is.log.Info("V2 multi-method correlation completed", "enhancedCorrelations", len(enhancedCorrelations))
                 }
 
                 // Update agent states

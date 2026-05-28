@@ -113,7 +113,166 @@ Work Log:
 - Fixed: Redis stream data_json truncation - now stores full data in Redis key with reference
 - Cross-layer verification confirmed Go backend is PRIMARY intelligence engine
 
+---
+Task ID: 3-a
+Agent: Subagent (general-purpose)
+Task: Collect OSINT + Telegram data from running services
+
+Work Log:
+- Fetched OSINT live-data from http://localhost:8000/api/live-data (HTTP 200, 222 KB) → saved to osint-snapshot.json
+- Individual scraper endpoints (/api/scrapers/*/data) returned 404; extracted data from snapshot instead
+- Saved individual scraper files: fires-data.json (500), gps-jamming-data.json (9), sigint-data.json (50 signals + totals), uavs-data.json (100), liveuamap-data.json (8)
+- Checked Telethon service status: connected as Knight (@KnightDark2023, user_id 6631285415)
+- Discovered correct API endpoints from server.py: /groups and /groups/{chat_id}/messages
+- Fetched messages from 4 Telegram groups (josemafeia, Chopi_Habana, mobydick_crypto, whalebotalerts) → 80 messages saved
+- Generated intelligence-summary.txt with full threat analysis (CRITICAL level)
+
+Stage Summary:
+- All 7 data files saved to /home/z/my-project/download/
+- OSINT: CRITICAL threat level, 15 military flights, 100 UAVs, 9 GPS jamming zones (4 severe), 500 fires, 50 SIGINT, 8 LiveUAMap conflict events
+- Telegram: 80 messages from Cuban commerce + crypto channels; no direct threat indicators
+- Key threats: Severe GPS jamming in Ukraine/Baltics/Kaliningrad/Black Sea, active conflicts in Eastern Ukraine + Syria + Middle East
+
 Stage Summary:
 - Go backend confirmed as PRIMARY intelligence engine (not Next.js)
 - All 4 DNA layers operational with identified gaps addressed
 - 3 critical wiring issues fixed, data truncation issue resolved
+
+---
+Task ID: 2
+Agent: go-backend-fixer
+Task: Fix Go backend compilation errors
+
+Work Log:
+- Downloaded and installed Go 1.25 to /home/z/.local/go (no Go was previously in PATH)
+- Verified go build ./... already passed with zero errors (production code was clean)
+- Identified test compilation errors across 2 packages via go test -count=0 ./...
+- Fixed internal/handlers/chatbot_processor_test.go: wrapped *whatsapp.Client in MetaClientAdapterWithClient to satisfy ClientInterface
+- Added NewMetaClientAdapterWithClient constructor to pkg/whatsapp/meta_client_adapter.go
+- Fixed pkg/whatsapp/multi_client_provider_test.go: logf.Opt -> logf.Opts (7 occurrences), AnalyticsTypeMessage -> AnalyticsTypeMessaging, removed unused handlerCalled variable, replaced inaccessible field assertions
+- Fixed pkg/whatsapp/whatsmeow_client_adapter_test.go: AnalyticsTypeMessage -> AnalyticsTypeMessaging, removed unused handlerCalled, replaced nil logf.Logger with valid logger, added logf import
+- Created test/testutil/mock_client_interface.go: full MockClientInterface implementing whatsapp.ClientInterface (was missing, referenced by start_session_test.go and whatsmeow_handler_test.go)
+- Fixed internal/handlers/testhelpers_test.go: changed withWhatsApp parameter from *whatsapp.Client to whatsapp.ClientInterface
+- Updated 4 test files (catalog_test.go, messages_test.go, templates_test.go) to wrap *whatsapp.Client in MetaClientAdapterWithClient
+- Fixed internal/handlers/whatsmeow_handler_test.go: corrected MessageInfo struct literals (Sender/IsFromMe now in embedded MessageSource), replaced types.NewMessageInfoTimestamp() with time.Now(), added testutil import, removed unused models import
+- Fixed internal/handlers/start_session_test.go: eliminated lock-copy vet warning by avoiding dereferencing fasthttp.Request
+- Fixed pkg/whatsapp/client_test.go: added missing replyToMessageID argument to SendTextMessage
+- Added SendTemplateMessageWithComponents method to pkg/whatsapp/client.go (was referenced by message_test.go but didn't exist)
+
+Stage Summary:
+- go build ./... passes with zero errors
+- go vet ./... passes with zero errors
+- go test -count=0 ./... passes with zero errors (all test packages compile)
+- 10 source files modified, 1 new file created
+
+---
+Task ID: 4
+Agent: Subagent (general-purpose)
+Task: Audit 4 DNA layers & 6 decision strategies
+
+Work Log:
+- Read all 25 Go intelligence package files in /home/z/my-project/internal/intelligence/
+- Read all 33 Next.js intelligence layer files in /home/z/my-project/src/lib/intelligence/
+- Assessed each DNA layer against spec requirements with Go vs Next.js comparison
+- Assessed all 6 decision strategies for completeness, real data usage, and spec compliance
+- Identified critical gaps: Adaptive strategy is advisory-only in Go, CorrelationEngineV2 is dead code, consensus agent identities differ between engines, prediction history is volatile
+- Identified 20 prioritized recommendations across P0-P3 severity levels
+- Wrote comprehensive audit report to /home/z/my-project/download/dna-audit-report.md
+
+Stage Summary:
+- Overall completeness score: 82/100
+- 4/4 DNA layers implemented (Ingestion 85, Analysis 90, Monitoring 80, Reports 75)
+- 6/6 strategies implemented (Thresholds 90, Patterns 85, Risk Scoring 95, Consensus 80, Predictive 75, Adaptive 65)
+- Critical issues: Adaptive strategy not functional in Go, CorrelationEngineV2 unwired, logic duplication between engines
+- Report saved to /home/z/my-project/download/dna-audit-report.md
+
+---
+Task ID: 5
+Agent: Subagent (general-purpose)
+Task: Fix Go intelligence P0 gaps (4 critical tasks)
+
+Work Log:
+- Task 1: Wired CorrelationEngineV2 into service pipeline
+  - Added `correlationV2 *CorrelationEngineV2` field to IntelligenceService struct
+  - Initialized it in NewIntelligenceService constructor
+  - Added `Correlate()` convenience method to CorrelationEngineV2 (wraps MultiMethodCorrelate)
+  - Called `is.correlationV2.Correlate()` in RunAnalysis() after V1 correlation, with logging
+
+- Task 2: Fixed Adaptive Strategy — auto-apply, per-threshold FPR, cooldown, bounds
+  - Added `thresholdStrategy *ThresholdStrategy` field for auto-apply capability
+  - Changed `NewAdaptiveStrategy` signature to accept ThresholdStrategy reference
+  - Captured original threshold values at construction for bounds enforcement
+  - Added `originalThresholds map[string]float64` — stores original values per metric
+  - Added `lastAdjustment map[string]time.Time` — tracks last adjustment time per metric
+  - Added `cooldownPeriod time.Duration` — set to 5 minutes
+  - Evaluate() now auto-applies threshold adjustments via ThresholdStrategy.UpdateThreshold()
+  - Enforces bounds: never adjusts below 10% or above 90% of original threshold value
+  - Enforces cooldown: skips adjustment if same metric was adjusted within 5-minute window
+  - FPR tracking already per-threshold (keyed by metric name), confirmed working
+  - Updated service.go to pass thresholdStrategy to NewAdaptiveStrategy
+
+- Task 3: Fixed Consensus Strategy — aligned agent identities with spec
+  - Replaced 4 agents: Analyst→OSINT, Investigator→SIGINT, Supervisor→HUMINT, Auditor→Predictive
+  - OSINT Agent: analyzes GPS jamming, UAVs, LiveUAMap, SIGINT, fires, GDELT, weather alerts
+  - SIGINT Agent: analyzes signal intelligence, cross-platform entity connections, message volume
+  - HUMINT Agent: analyzes message content, keyword detection, fraud indicators, entity risk levels
+  - Predictive Agent: analyzes active/critical patterns, trend indicators, entity volume
+  - Aligned consensus outcome with spec:
+    - 4/4 agreement → auto-execute (action: "auto_execute", severity: "CRÍTICA")
+    - 3/4 agreement → auto-execute + notify human (action: "auto_execute_notify", severity: "ALTA")
+    - 2/4 agreement → require human approval (action: "require_approval", severity: "MEDIA")
+    - 1/4 agreement → false positive (action: "dismiss", severity: "INFO")
+
+- Task 4: Fixed Monitoring — alert deduplication, ring buffer, query method
+  - Added `Fingerprint` field to Alert struct (types.go) for dedup key
+  - Added `computeAlertFingerprint()` function: SHA256 hash of (strategy + source + title)
+  - Added deduplication in GenerateAlert(): checks fingerprint, skips if within 15-minute window
+  - Replaced unbounded `alerts map[string]*Alert` with ring buffer (max 1000 entries)
+  - Added `alertRing []Alert` + `alertRingPos int` for ring buffer storage
+  - Added `alertDedup map[string]time.Time` for fingerprint-based dedup tracking
+  - Ring buffer maintains O(1) lookup via parallel `alerts` map (for ack/escalate by ID)
+  - When ring buffer overflows, oldest entry is removed from both ring and lookup map
+  - Added `GetRecentAlerts(n int) []Alert` method to query N most recent alerts from ring buffer
+  - Cleaned up stale dedup entries automatically (older than 15 minutes)
+  - Updated `GetAlerts()` to read from ring buffer instead of unbounded map
+
+- Build verification: `go build ./...` passes with zero errors
+
+Files Modified:
+1. /home/z/my-project/internal/intelligence/correlation_engine_v2.go — Added Correlate() method
+2. /home/z/my-project/internal/intelligence/service.go — Added correlationV2 field, constructor init, V2 call in RunAnalysis, updated NewAdaptiveStrategy call
+3. /home/z/my-project/internal/intelligence/strategies.go — Rewrote AdaptiveStrategy (auto-apply, bounds, cooldown), rewrote ConsensusStrategy (4 spec agents, spec-aligned outcomes)
+4. /home/z/my-project/internal/intelligence/monitoring.go — Added ring buffer, dedup, fingerprint, GetRecentAlerts
+5. /home/z/my-project/internal/intelligence/types.go — Added Fingerprint field to Alert
+
+Stage Summary:
+- All 4 P0 tasks completed successfully
+- go build ./... passes with zero errors
+- CorrelationEngineV2 is now live in the pipeline
+- Adaptive strategy now auto-applies with safety guards (cooldown + bounds)
+- Consensus strategy matches spec (OSINT/SIGINT/HUMINT/Predictive agents, 4-tier agreement)
+- Monitoring has bounded storage (ring buffer max 1000) and 15-minute dedup
+
+---
+Task ID: session-continuation
+Agent: main
+Task: Continue intelligence system build from previous session
+
+Work Log:
+- Fixed TypeError crash in research-view.tsx (data.runs.length on undefined) by adding defensive merge
+- Fixed hermes-view.tsx with same defensive merge pattern
+- Fixed /api/deerflow route to return DeerFlowData-shaped response
+- Verified services running: OSINT (port 8000), Telethon (port 8700), WhatsApp bridge (PM2)
+- Collected OSINT data: 500 fires, 9 GPS jamming zones, 15 military flights, 50 SIGINT signals, 8 conflict events
+- Collected 80 Telegram messages from 4 groups
+- Generated comprehensive intelligence report PDF (12 sections, 10 tables)
+- Sent PDF report + summary to user's Telegram (message_id: 27611, 27612)
+- Go backend compilation fixed (18 errors across test files, adapters, interfaces)
+- Audited 4 DNA layers and 6 decision strategies (overall score: 82/100)
+- P0 fixes applied: CorrelationEngineV2 wired, Adaptive strategy auto-apply with cooldown/bounds, Consensus strategy aligned to spec, Monitoring alert dedup with ring buffer
+
+Stage Summary:
+- Intelligence report PDF delivered to Telegram
+- Go backend compiles cleanly with all P0 fixes
+- DNA layer audit completed, key gaps identified and addressed
+- System operational with OSINT + Telethon services running

@@ -6,6 +6,7 @@ import (
         "github.com/google/uuid"
         "github.com/shridarpatil/whatomate/internal/models"
         "github.com/stretchr/testify/assert"
+        "github.com/zerodha/logf"
         "go.mau.fi/whatsmeow"
 )
 
@@ -197,7 +198,7 @@ func TestWhatsmeowClientAdapter_UnsupportedMethods(t *testing.T) {
         })
 
         t.Run("GetAnalytics not supported", func(t *testing.T) {
-                _, err := adapter.GetAnalytics(nil, account, AnalyticsTypeMessage, nil)
+                _, err := adapter.GetAnalytics(nil, account, AnalyticsTypeMessaging, nil)
                 assert.Error(t, err)
                 assert.Contains(t, err.Error(), "not supported")
         })
@@ -359,10 +360,7 @@ func TestWhatsmeowClientAdapter_SetIncomingMessageHandler(t *testing.T) {
                 clients: make(map[string]*whatsmeow.Client),
         }
 
-        handlerCalled := false
-        handler := func(account *models.WhatsAppAccount, data interface{}) {
-                handlerCalled = true
-        }
+        handler := func(account *models.WhatsAppAccount, data interface{}) {}
 
         adapter.SetIncomingMessageHandler(handler)
         assert.NotNil(t, adapter.incomingMessageHandler, "Handler should be set")
@@ -381,7 +379,8 @@ func TestWhatsmeowClientAdapter_GetQRChannel(t *testing.T) {
 
 // TestWhatsmeowClientAdapter_NewWhatsmeowClientAdapter verifies constructor
 func TestWhatsmeowClientAdapter_NewWhatsmeowClientAdapter(t *testing.T) {
-        adapter := NewWhatsmeowClientAdapter(nil, nil, nil, nil)
+        log := logf.New(logf.Opts{Level: logf.DebugLevel})
+        adapter := NewWhatsmeowClientAdapter(log, nil, nil, nil)
         assert.NotNil(t, adapter, "Adapter should not be nil")
         assert.NotNil(t, adapter.clients, "Clients map should be initialized")
         assert.NotNil(t, adapter.qrChannel, "QR channel should be initialized")

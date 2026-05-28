@@ -66,15 +66,13 @@ func makeAccountRequest(method string, path string, body interface{}, orgID, use
                 reqBody, _ = json.Marshal(body)
         }
 
-        fastReq := fasthttp.AcquireRequest()
-        fastReq.SetRequestURI(path)
-        fastReq.Header.SetMethod(method)
+        ctx := &fasthttp.RequestCtx{}
+        ctx.Request.SetRequestURI(path)
+        ctx.Request.Header.SetMethod(method)
         if reqBody != nil {
-                fastReq.SetBody(reqBody)
-                fastReq.Header.SetContentType("application/json")
+                ctx.Request.SetBody(reqBody)
+                ctx.Request.Header.SetContentType("application/json")
         }
-
-        ctx := &fasthttp.RequestCtx{Request: *fastReq}
         ctx.SetUserValue("organization_id", orgID)
         ctx.SetUserValue("user_id", userID)
 

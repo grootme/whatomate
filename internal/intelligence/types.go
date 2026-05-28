@@ -109,6 +109,7 @@ type Alert struct {
         Description  string    `json:"description"`
         ActionTaken  string    `json:"actionTaken"`
         Strategy     string    `json:"strategy"`
+        Fingerprint  string    `json:"fingerprint"` // Dedup key: hash of (type + source + title)
         Timestamp    time.Time `json:"timestamp"`
         Acknowledged bool      `json:"acknowledged"`
         Escalated    bool      `json:"escalated"`

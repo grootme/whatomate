@@ -21,6 +21,14 @@ func NewMetaClientAdapter(log logf.Logger) *MetaClientAdapter {
         }
 }
 
+// NewMetaClientAdapterWithClient creates a new adapter with a pre-configured Client.
+// This is useful for testing where a custom client (e.g., with a mock base URL) is needed.
+func NewMetaClientAdapterWithClient(client *Client) *MetaClientAdapter {
+        return &MetaClientAdapter{
+                client: client,
+        }
+}
+
 // ValidateCredentials validates Meta API credentials.
 func (m *MetaClientAdapter) ValidateCredentials(ctx context.Context, account *models.WhatsAppAccount) error {
         if account.AccessToken == "" || account.PhoneID == "" || account.BusinessID == "" {

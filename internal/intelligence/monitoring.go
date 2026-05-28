@@ -2,6 +2,7 @@ package intelligence
 
 import (
         "context"
+        "crypto/sha256"
         "encoding/json"
         "fmt"
         "sort"
@@ -13,24 +14,35 @@ import (
         "github.com/zerodha/logf"
 )
 
+const alertRingBufferSize = 1000
+
+// alertDedupWindow is the time window for alert deduplication
+const alertDedupWindow = 15 * time.Minute
+
 // MonitoringEngine implements DNA Layer 3: Alert Workflow & Monitoring
 type MonitoringEngine struct {
         eventStore *EventStore
         redis      *redis.Client
         log        logf.Logger
         agents     map[string]*AgentState
-        alerts     map[string]*Alert
+        alerts     map[string]*Alert       // ID -> Alert for O(1) lookup (acknowledge/escalate)
+        alertRing  []Alert                  // Ring buffer for ordered storage (max 1000)
+        alertRingPos int                    // Write position in ring buffer
+        alertDedup map[string]time.Time     // fingerprint -> last alert time for dedup
         mu         sync.RWMutex
 }
 
 // NewMonitoringEngine creates a new MonitoringEngine
 func NewMonitoringEngine(es *EventStore, rdb *redis.Client, log logf.Logger) *MonitoringEngine {
         me := &MonitoringEngine{
-                eventStore: es,
-                redis:      rdb,
-                log:        log,
-                agents:     make(map[string]*AgentState),
-                alerts:     make(map[string]*Alert),
+                eventStore:   es,
+                redis:        rdb,
+                log:          log,
+                agents:       make(map[string]*AgentState),
+                alerts:       make(map[string]*Alert),
+                alertRing:    make([]Alert, 0, alertRingBufferSize),
+                alertRingPos: 0,
+                alertDedup:   make(map[string]time.Time),
         }
 
         // Initialize default agents
@@ -116,23 +128,69 @@ func (me *MonitoringEngine) ProcessAlertWorkflow(ctx context.Context, strategyCt
         return alerts
 }
 
+// computeAlertFingerprint generates a dedup key from alert type (strategy), source, and title
+func computeAlertFingerprint(strategy, source, title string) string {
+        h := sha256.New()
+        h.Write([]byte(strategy + ":" + source + ":" + title))
+        return fmt.Sprintf("%x", h.Sum(nil))[:16]
+}
+
 // GenerateAlert creates an Alert from a StrategyResult
 func (me *MonitoringEngine) GenerateAlert(result StrategyResult) Alert {
-        alert := Alert{
-                ID:           uuid.New().String(),
-                Source:       "intelligence_engine",
-                Severity:     result.Severity,
-                Title:        me.generateAlertTitle(result),
-                Description:  result.Reasoning,
-                ActionTaken:  result.Action,
-                Strategy:     me.inferStrategyFromResult(result),
-                Timestamp:    time.Now(),
-                Acknowledged: false,
-                Escalated:    result.Action == "escalate",
+        // Determine the strategy type for fingerprinting
+        strategyType := me.inferStrategyFromResult(result)
+        fingerprint := computeAlertFingerprint(strategyType, "intelligence_engine", me.generateAlertTitle(result))
+
+        // Check deduplication: don't create duplicate alerts within 15 minutes
+        me.mu.Lock()
+        if lastTime, ok := me.alertDedup[fingerprint]; ok {
+                if time.Since(lastTime) < alertDedupWindow {
+                        me.mu.Unlock()
+                        // Return a zero-value alert to signal dedup skip
+                        me.log.Info("Alert deduplicated", "fingerprint", fingerprint, "lastSeen", lastTime)
+                        return Alert{ID: "", Fingerprint: fingerprint}
+                }
         }
 
-        me.mu.Lock()
+        alert := Alert{
+                ID:          uuid.New().String(),
+                Source:      "intelligence_engine",
+                Severity:    result.Severity,
+                Title:       me.generateAlertTitle(result),
+                Description: result.Reasoning,
+                ActionTaken: result.Action,
+                Strategy:    strategyType,
+                Fingerprint: fingerprint,
+                Timestamp:   time.Now(),
+                Acknowledged: false,
+                Escalated:   result.Action == "escalate",
+        }
+
+        // Store in lookup map
         me.alerts[alert.ID] = &alert
+
+        // Store in ring buffer (max 1000)
+        if len(me.alertRing) < alertRingBufferSize {
+                me.alertRing = append(me.alertRing, alert)
+        } else {
+                // Overwrite oldest entry; remove it from the lookup map
+                old := me.alertRing[me.alertRingPos]
+                delete(me.alerts, old.ID)
+                me.alertRing[me.alertRingPos] = alert
+        }
+        me.alertRingPos = (me.alertRingPos + 1) % alertRingBufferSize
+
+        // Record dedup fingerprint
+        me.alertDedup[fingerprint] = alert.Timestamp
+
+        // Clean up old dedup entries (older than 15 minutes)
+        now := time.Now()
+        for fp, t := range me.alertDedup {
+                if now.Sub(t) > alertDedupWindow {
+                        delete(me.alertDedup, fp)
+                }
+        }
+
         me.mu.Unlock()
 
         return alert
@@ -229,11 +287,13 @@ func (me *MonitoringEngine) UpdateAgentState(agentID string, state AgentState) {
 func (me *MonitoringEngine) GetAlerts(ctx context.Context, limit int) []Alert {
         me.mu.RLock()
 
-        // First check in-memory cache
-        if len(me.alerts) > 0 {
-                alerts := make([]Alert, 0, len(me.alerts))
-                for _, a := range me.alerts {
-                        alerts = append(alerts, *a)
+        // First check in-memory ring buffer
+        if len(me.alertRing) > 0 {
+                alerts := make([]Alert, 0, len(me.alertRing))
+                for _, a := range me.alertRing {
+                        if a.ID != "" { // Skip empty/dedup placeholder entries
+                                alerts = append(alerts, a)
+                        }
                 }
                 me.mu.RUnlock()
 
@@ -286,6 +346,35 @@ func (me *MonitoringEngine) GetAlerts(ctx context.Context, limit int) []Alert {
         }
 
         return []Alert{}
+}
+
+// GetRecentAlerts returns the N most recent alerts from the ring buffer
+func (me *MonitoringEngine) GetRecentAlerts(n int) []Alert {
+        me.mu.RLock()
+        defer me.mu.RUnlock()
+
+        if len(me.alertRing) == 0 {
+                return []Alert{}
+        }
+
+        // Collect non-empty alerts
+        alerts := make([]Alert, 0, len(me.alertRing))
+        for _, a := range me.alertRing {
+                if a.ID != "" {
+                        alerts = append(alerts, a)
+                }
+        }
+
+        // Sort by timestamp descending (most recent first)
+        sort.Slice(alerts, func(i, j int) bool {
+                return alerts[i].Timestamp.After(alerts[j].Timestamp)
+        })
+
+        if len(alerts) > n {
+                alerts = alerts[:n]
+        }
+
+        return alerts
 }
 
 // AcknowledgeAlert marks an alert as acknowledged
