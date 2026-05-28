@@ -25,6 +25,15 @@ type IntelligenceService struct {
         reports     *ReportGenerator
         osintClient *OSINTClient
 
+        // New components
+        osintConsumer          *OSINTStreamConsumer
+        telegramOSINTCorrelator *TelegramOSINTCorrelator
+        threatComputer        *ThreatLevelComputer
+        reportScheduler       *ReportScheduler
+        osintCache            *OSINTCache
+        alertNotifier         *AlertNotifier
+        healthAggregator      *HealthCheckAggregator
+
         db         *gorm.DB
         redis      *redis.Client
         log        logf.Logger
@@ -35,6 +44,7 @@ type IntelligenceService struct {
         // Scheduler state
         schedulerRunning bool
         schedulerCancel  context.CancelFunc
+        schedulerStatus  SchedulerStatus
         mu               sync.RWMutex
 }
 
@@ -83,6 +93,15 @@ func NewIntelligenceService(db *gorm.DB, rdb *redis.Client, httpClient *http.Cli
                 httpClient:  httpClient,
                 startedAt:   time.Now(),
         }
+
+        // Initialize new components
+        service.osintConsumer = NewOSINTStreamConsumer(eventStore, rdb, osintClient, log)
+        service.telegramOSINTCorrelator = NewTelegramOSINTCorrelator(eventStore, analysisEngine, log)
+        service.threatComputer = NewThreatLevelComputer(eventStore, log)
+        service.reportScheduler = NewReportScheduler(service, log)
+        service.osintCache = NewOSINTCache(rdb, log, 5*time.Minute)
+        service.alertNotifier = NewAlertNotifier(rdb, log)
+        service.healthAggregator = NewHealthCheckAggregator(service, log)
 
         return service
 }
@@ -133,6 +152,7 @@ func (is *IntelligenceService) IngestMessage(ctx context.Context, msg RawMessage
                         "channelName": msg.ChannelName,
                         "channelId":   msg.ChannelID,
                         "senderName":  msg.SenderName,
+                        "content":     msg.Content,
                         "contentHash": msg.ContentHash,
                         "timestamp":   msg.Timestamp.Format(time.RFC3339),
                 },
@@ -188,15 +208,26 @@ func (is *IntelligenceService) AnalyzeMessage(ctx context.Context, msgID string)
                 }
         }
 
-        // For now, we need the content which may be in metadata
+        // For now, we need the content which may be in metadata or payload
         // In a full implementation, content would be stored in a dedicated messages table
         if msg.Content == "" {
-                // Try to get content from metadata
+                // Try to get content from payload first (where IngestMessage stores it)
                 for _, event := range events {
-                        if event.Metadata != nil {
-                                if content, ok := event.Metadata["content"]; ok {
+                        if event.Payload != nil {
+                                if content, ok := event.Payload["content"]; ok {
                                         msg.Content = fmt.Sprintf("%v", content)
                                         break
+                                }
+                        }
+                }
+                // Fallback: try metadata
+                if msg.Content == "" {
+                        for _, event := range events {
+                                if event.Metadata != nil {
+                                        if content, ok := event.Metadata["content"]; ok {
+                                                msg.Content = fmt.Sprintf("%v", content)
+                                                break
+                                        }
                                 }
                         }
                 }
@@ -539,15 +570,13 @@ func (is *IntelligenceService) GetStreamInfo(ctx context.Context) map[string]*St
 
 // SchedulerStatus represents the current state of the background scheduler
 type SchedulerStatus struct {
-        Running      bool      `json:"running"`
-        StartedAt    time.Time `json:"startedAt"`
+        Running      bool       `json:"running"`
+        StartedAt    time.Time  `json:"startedAt"`
         LastAnalysis *time.Time `json:"lastAnalysis,omitempty"`
         LastOSINT    *time.Time `json:"lastOSINT,omitempty"`
         NextRun      *time.Time `json:"nextRun,omitempty"`
         CycleCount   int        `json:"cycleCount"`
 }
-
-var schedulerStatus SchedulerStatus
 
 // StartScheduler starts the background task scheduler for periodic tasks
 func (is *IntelligenceService) StartScheduler(ctx context.Context) {
@@ -560,10 +589,6 @@ func (is *IntelligenceService) StartScheduler(ctx context.Context) {
         ctx, cancel := context.WithCancel(ctx)
         is.schedulerCancel = cancel
         is.schedulerRunning = true
-        schedulerStatus = SchedulerStatus{
-                Running:   true,
-                StartedAt: time.Now(),
-        }
         is.mu.Unlock()
 
         is.log.Info("Intelligence scheduler started")
@@ -573,6 +598,12 @@ func (is *IntelligenceService) StartScheduler(ctx context.Context) {
                 osintTicker := time.NewTicker(15 * time.Minute)   // Fetch OSINT every 15 minutes
                 strategyTicker := time.NewTicker(10 * time.Minute) // Evaluate strategies every 10 minutes
                 healthTicker := time.NewTicker(1 * time.Minute)    // Check health every minute
+
+                // Local scheduler status protected by the service mutex
+                localStatus := SchedulerStatus{
+                        Running:   true,
+                        StartedAt: time.Now(),
+                }
 
                 defer func() {
                         analysisTicker.Stop()
@@ -586,7 +617,8 @@ func (is *IntelligenceService) StartScheduler(ctx context.Context) {
                         case <-ctx.Done():
                                 is.mu.Lock()
                                 is.schedulerRunning = false
-                                schedulerStatus.Running = false
+                                localStatus.Running = false
+                                is.schedulerStatus = localStatus
                                 is.mu.Unlock()
                                 is.log.Info("Intelligence scheduler stopped")
                                 return
@@ -598,8 +630,11 @@ func (is *IntelligenceService) StartScheduler(ctx context.Context) {
                                         is.log.Error("Scheduler: analysis failed", "error", err)
                                 }
                                 now := time.Now()
-                                schedulerStatus.LastAnalysis = &now
-                                schedulerStatus.CycleCount++
+                                localStatus.LastAnalysis = &now
+                                localStatus.CycleCount++
+                                is.mu.Lock()
+                                is.schedulerStatus = localStatus
+                                is.mu.Unlock()
 
                         case <-osintTicker.C:
                                 is.log.Debug("Scheduler: fetching OSINT data")
@@ -608,7 +643,10 @@ func (is *IntelligenceService) StartScheduler(ctx context.Context) {
                                         is.log.Error("Scheduler: OSINT fetch failed", "error", err)
                                 }
                                 now := time.Now()
-                                schedulerStatus.LastOSINT = &now
+                                localStatus.LastOSINT = &now
+                                is.mu.Lock()
+                                is.schedulerStatus = localStatus
+                                is.mu.Unlock()
 
                                 // Update agent state
                                 is.monitoring.UpdateAgentState("agent-ingest-osint", AgentState{
@@ -627,6 +665,9 @@ func (is *IntelligenceService) StartScheduler(ctx context.Context) {
                                 if err != nil {
                                         is.log.Error("Scheduler: strategy evaluation failed", "error", err)
                                 }
+                                is.mu.Lock()
+                                is.schedulerStatus = localStatus
+                                is.mu.Unlock()
 
                         case <-healthTicker.C:
                                 is.monitoring.CheckAgentHealth()
@@ -644,14 +685,14 @@ func (is *IntelligenceService) StopScheduler() {
                 is.schedulerCancel()
         }
         is.schedulerRunning = false
-        schedulerStatus.Running = false
+        is.schedulerStatus.Running = false
 }
 
 // GetSchedulerStatus returns the current scheduler status
 func (is *IntelligenceService) GetSchedulerStatus() SchedulerStatus {
         is.mu.RLock()
         defer is.mu.RUnlock()
-        return schedulerStatus
+        return is.schedulerStatus
 }
 
 // ======================================================================
@@ -679,8 +720,9 @@ func (is *IntelligenceService) GetHealthStatus(ctx context.Context) HealthStatus
         // Check PostgreSQL
         sqlDB, err := is.db.DB()
         if err == nil {
-                status.Postgres = sqlDB.Ping() == nil
-                if sqlDB.Ping() != nil {
+                pingErr := sqlDB.Ping()
+                status.Postgres = pingErr == nil
+                if pingErr != nil {
                         status.Status = "unhealthy"
                 }
         } else {
@@ -705,6 +747,88 @@ func (is *IntelligenceService) GetHealthStatus(ctx context.Context) HealthStatus
         }
 
         return status
+}
+
+// GetAggregatedHealth returns a comprehensive health check across all subsystems
+func (is *IntelligenceService) GetAggregatedHealth(ctx context.Context) AggregatedHealth {
+        health := AggregatedHealth{
+                Timestamp: time.Now(),
+                Version:   "1.0.0",
+                Uptime:    time.Since(is.startedAt).String(),
+                Components: make(map[string]ComponentHealth),
+                Status:    "healthy",
+        }
+
+        // Check Redis
+        redisStart := time.Now()
+        if is.redis != nil {
+                err := is.redis.Ping(ctx).Err()
+                latency := time.Since(redisStart).Milliseconds()
+                if err != nil {
+                        health.Components["redis"] = ComponentHealth{Status: "unhealthy", LatencyMs: latency, Message: err.Error()}
+                        health.Status = "degraded"
+                } else {
+                        health.Components["redis"] = ComponentHealth{Status: "healthy", LatencyMs: latency}
+                }
+        } else {
+                health.Components["redis"] = ComponentHealth{Status: "unavailable", Message: "Redis client not configured"}
+                health.Status = "degraded"
+        }
+
+        // Check PostgreSQL
+        pgStart := time.Now()
+        sqlDB, err := is.db.DB()
+        if err != nil {
+                health.Components["postgres"] = ComponentHealth{Status: "unhealthy", Message: err.Error()}
+                health.Status = "unhealthy"
+        } else {
+                pingErr := sqlDB.Ping()
+                latency := time.Since(pgStart).Milliseconds()
+                if pingErr != nil {
+                        health.Components["postgres"] = ComponentHealth{Status: "unhealthy", LatencyMs: latency, Message: pingErr.Error()}
+                        health.Status = "unhealthy"
+                } else {
+                        health.Components["postgres"] = ComponentHealth{Status: "healthy", LatencyMs: latency}
+                }
+        }
+
+        // Check OSINT service
+        osintStart := time.Now()
+        osintAvailable := is.osintClient.IsAvailable(ctx)
+        osintLatency := time.Since(osintStart).Milliseconds()
+        if osintAvailable {
+                health.Components["osint"] = ComponentHealth{Status: "healthy", LatencyMs: osintLatency}
+        } else {
+                health.Components["osint"] = ComponentHealth{Status: "degraded", LatencyMs: osintLatency, Message: "OSINT service unreachable"}
+                if health.Status == "healthy" {
+                        health.Status = "degraded"
+                }
+        }
+
+        // Check Event Store
+        health.Components["eventstore"] = ComponentHealth{Status: "healthy"}
+
+        // Agent health summary
+        agents := is.monitoring.GetAgentStates()
+        for _, a := range agents {
+                health.AgentSummary.Total++
+                switch a.Status {
+                case "active":
+                        health.AgentSummary.Active++
+                case "idle":
+                        health.AgentSummary.Idle++
+                case "error":
+                        health.AgentSummary.Error++
+                case "offline":
+                        health.AgentSummary.Offline++
+                }
+        }
+
+        if health.AgentSummary.Error > 0 && health.Status == "healthy" {
+                health.Status = "degraded"
+        }
+
+        return health
 }
 
 // ======================================================================
@@ -913,6 +1037,82 @@ func (is *IntelligenceService) GetAnomalies(ctx context.Context) []map[string]in
         }
 
         return anomalies
+}
+
+// ComputeOSINTThreatLevel computes a detailed threat level from real OSINT data
+func (is *IntelligenceService) ComputeOSINTThreatLevel(ctx context.Context, data *OSINTSnapshot) *ThreatAssessment {
+        return is.threatComputer.ComputeThreatLevel(ctx, data)
+}
+
+// CorrelateTelegramWithOSINT correlates Telegram messages with OSINT data
+func (is *IntelligenceService) CorrelateTelegramWithOSINT(ctx context.Context, messages []RawMessage, osintData *OSINTSnapshot) []CorrelationMatch {
+        return is.telegramOSINTCorrelator.CorrelateBatch(ctx, messages, osintData)
+}
+
+// GetOSINTCache returns the OSINT cache for direct access
+func (is *IntelligenceService) GetOSINTCache() *OSINTCache {
+        return is.osintCache
+}
+
+// GetAlertNotifier returns the alert notifier for direct access
+func (is *IntelligenceService) GetAlertNotifier() *AlertNotifier {
+        return is.alertNotifier
+}
+
+// GetHealthAggregator returns the health check aggregator
+func (is *IntelligenceService) GetHealthAggregator() *HealthCheckAggregator {
+        return is.healthAggregator
+}
+
+// GetReportScheduler returns the report scheduler for direct access
+func (is *IntelligenceService) GetReportScheduler() *ReportScheduler {
+        return is.reportScheduler
+}
+
+// StartOSINTConsumer starts the OSINT stream consumer
+func (is *IntelligenceService) StartOSINTConsumer(ctx context.Context) error {
+        return is.osintConsumer.Start(ctx)
+}
+
+// StartBackgroundTasks starts all background tasks including health aggregator,
+// real-time threat computer, and metrics collector
+func (is *IntelligenceService) StartBackgroundTasks(ctx context.Context) {
+        // Start health aggregator (30-second intervals)
+        if is.healthAggregator != nil {
+                go is.healthAggregator.Start(ctx, 30*time.Second)
+                is.log.Info("Health aggregator started")
+        }
+
+        // Start real-time threat computer (2-minute intervals)
+        realtimeThreat := NewRealtimeThreatComputer(is.eventStore, is.threatComputer, is.alertNotifier, is.osintClient, is.log)
+        go realtimeThreat.Start(ctx, 2*time.Minute)
+        is.log.Info("Real-time threat computer started")
+
+        // Start metrics collector
+        metricsCollector := NewMetricsCollector(is)
+        go func() {
+                ticker := time.NewTicker(30 * time.Second)
+                defer ticker.Stop()
+                for {
+                        select {
+                        case <-ctx.Done():
+                                return
+                        case <-ticker.C:
+                                _ = metricsCollector.Snapshot(ctx)
+                        }
+                }
+        }()
+        is.log.Info("Metrics collector started")
+
+        // Apply default report templates
+        if is.reportScheduler != nil {
+                templates := NewScheduledReportTemplates(is.reportScheduler, is.log)
+                if _, err := templates.ApplyAllTemplates(ctx, true); err != nil {
+                        is.log.Error("Failed to apply default report templates", "error", err)
+                } else {
+                        is.log.Info("Default report templates applied")
+                }
+        }
 }
 
 // GetThreatLevel returns the current threat level assessment

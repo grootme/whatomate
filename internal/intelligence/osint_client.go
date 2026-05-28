@@ -11,6 +11,9 @@ import (
         "github.com/zerodha/logf"
 )
 
+// MaxOSINTResponseSize is the maximum allowed response body size (10MB)
+const MaxOSINTResponseSize = 10 * 1024 * 1024
+
 // OSINTClient communicates with the Python OSINT service
 type OSINTClient struct {
         httpClient  *http.Client
@@ -24,6 +27,11 @@ type OSINTClient struct {
 func NewOSINTClient(httpClient *http.Client, baseURL string, log logf.Logger) *OSINTClient {
         if baseURL == "" {
                 baseURL = "http://localhost:8000"
+        }
+        if httpClient == nil {
+                httpClient = &http.Client{
+                        Timeout: 30 * time.Second,
+                }
         }
         return &OSINTClient{
                 httpClient: httpClient,
@@ -52,11 +60,12 @@ func (oc *OSINTClient) FetchOSINTData(ctx context.Context) (*OSINTSnapshot, erro
         defer resp.Body.Close()
 
         if resp.StatusCode != http.StatusOK {
-                body, _ := io.ReadAll(resp.Body)
-                return nil, fmt.Errorf("OSINT service returned status %d: %s", resp.StatusCode, string(body))
+                // Drain the body to allow connection reuse
+                _, _ = io.ReadAll(resp.Body)
+                return nil, fmt.Errorf("OSINT service returned status %d", resp.StatusCode)
         }
 
-        body, err := io.ReadAll(resp.Body)
+        body, err := io.ReadAll(io.LimitReader(resp.Body, MaxOSINTResponseSize))
         if err != nil {
                 return nil, fmt.Errorf("failed to read OSINT response: %w", err)
         }
@@ -106,8 +115,8 @@ func (oc *OSINTClient) FetchThreatFeed(ctx context.Context) (map[string]interfac
         defer resp.Body.Close()
 
         if resp.StatusCode != http.StatusOK {
-                body, _ := io.ReadAll(resp.Body)
-                return nil, fmt.Errorf("threat feed returned status %d: %s", resp.StatusCode, string(body))
+                _, _ = io.ReadAll(resp.Body) // Drain body for connection reuse
+                return nil, fmt.Errorf("threat feed returned status %d", resp.StatusCode)
         }
 
         body, err := io.ReadAll(resp.Body)
@@ -143,8 +152,8 @@ func (oc *OSINTClient) FetchAISummary(ctx context.Context) (string, error) {
         defer resp.Body.Close()
 
         if resp.StatusCode != http.StatusOK {
-                body, _ := io.ReadAll(resp.Body)
-                return "", fmt.Errorf("AI summary returned status %d: %s", resp.StatusCode, string(body))
+                _, _ = io.ReadAll(resp.Body) // Drain body for connection reuse
+                return "", fmt.Errorf("AI summary returned status %d", resp.StatusCode)
         }
 
         body, err := io.ReadAll(resp.Body)

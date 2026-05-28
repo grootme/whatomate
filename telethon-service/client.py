@@ -362,6 +362,26 @@ class TelethonClient:
         except Exception as e:
             return {'success': False, 'error': str(e)}
 
+    async def send_file(self, chat_id: int, file_path: str, caption: str = None) -> dict:
+        """Send a file as the user to a specific chat."""
+        if not self.connected:
+            raise RuntimeError('Not connected')
+
+        try:
+            result = await self._client.send_file(
+                chat_id,
+                file_path,
+                caption=caption or '',
+                parse_mode='html'
+            )
+            return {
+                'success': True,
+                'message_id': result.id,
+                'date': result.date.isoformat() if result.date else None,
+            }
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
     def _get_user_info(self) -> dict:
         """Get info about the authenticated user."""
         if not self._me:

@@ -367,12 +367,29 @@ async def _fetch_all_data() -> dict[str, Any]:
 
     # Publish data-refreshed event to Redis Stream
     data_json = json.dumps(payload, default=str)
-    await _publish_to_stream("whatomate:osint_events", {
-        "event_type": "osint.data_refreshed",
-        "source": "shadowbroker-osint",
-        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
-        "data_json": data_json[:4000],
-    })
+    # Store full data in a Redis key and reference it in the stream event
+    # to avoid Redis Stream field size limitations
+    if redis_client:
+        try:
+            data_key = f"whatomate:osint_snapshot:{datetime.now(tz=timezone.utc).strftime('%Y%m%d%H%M%S')}"
+            redis_client.set(data_key, data_json, ex=3600)  # 1 hour TTL
+            await _publish_to_stream("whatomate:osint_events", {
+                "event_type": "osint.data_refreshed",
+                "source": "shadowbroker-osint",
+                "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+                "data_ref": data_key,
+                "data_size": str(len(data_json)),
+            })
+        except Exception as e:
+            logger.warning(f"Failed to publish OSINT data reference to Redis: {e}")
+    else:
+        # Fallback: include truncated data in stream event
+        await _publish_to_stream("whatomate:osint_events", {
+            "event_type": "osint.data_refreshed",
+            "source": "shadowbroker-osint",
+            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+            "data_json": data_json[:4000],
+        })
 
     return payload
 

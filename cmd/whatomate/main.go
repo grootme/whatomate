@@ -151,7 +151,7 @@ func runServer(args []string) {
                 lo.Fatal("Failed to get sql.DB from gorm.DB", "error", err)
         }
         container := sqlstore.NewWithDB(sqlDB, "postgres", nil) // Use the same DB for whatsmeow sessions
-        err = container.Upgrade()
+        err = container.Upgrade(context.Background())
         if err != nil {
                 lo.Fatal("Failed to upgrade whatsmeow store", "error", err)
         }
@@ -183,7 +183,7 @@ func runServer(args []string) {
         lo.Info("WebSocket hub started")
 
         // Initialize WhatsApp client provider
-        waClient := whatsapp.NewMultiClientProvider(lo, container, wsHub)
+        waClient := whatsapp.NewMultiClientProvider(lo, db, container, wsHub)
 
         // Initialize app with dependencies
         // Shared HTTP client with connection pooling for external API calls

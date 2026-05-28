@@ -34,6 +34,7 @@ type ClientInterface interface {
         UploadMedia(ctx context.Context, account *models.WhatsAppAccount, data []byte, mimeType, filename string) (string, error)
         GetMediaURL(ctx context.Context, mediaID string, account *models.WhatsAppAccount) (string, error)
         DownloadMedia(ctx context.Context, mediaURL string, accessToken string) ([]byte, error)
+        DownloadMediaCustom(ctx context.Context, account *models.WhatsAppAccount, msg interface{}) ([]byte, error)
         ResumableUpload(ctx context.Context, account *models.WhatsAppAccount, data []byte, mimeType, filename string) (string, error)
 
         // Business Profile
@@ -51,6 +52,32 @@ type ClientInterface interface {
         // Session Management (Whatsmeow specific)
         StartSession(ctx context.Context, account *models.WhatsAppAccount) error
         CloseSession(ctx context.Context, account *models.WhatsAppAccount) error
+
+        // Catalog
+        CreateCatalog(ctx context.Context, account *models.WhatsAppAccount, name string) (string, error)
+        DeleteCatalog(ctx context.Context, account *models.WhatsAppAccount, catalogID string) error
+        ListCatalogs(ctx context.Context, account *models.WhatsAppAccount) ([]CatalogInfo, error)
+        CreateProduct(ctx context.Context, account *models.WhatsAppAccount, catalogID string, product *ProductInput) (string, error)
+        UpdateProduct(ctx context.Context, account *models.WhatsAppAccount, productID string, product *ProductInput) error
+        DeleteProduct(ctx context.Context, account *models.WhatsAppAccount, productID string) error
+
+        // Flows
+        GetFlow(ctx context.Context, account *models.WhatsAppAccount, flowID string) (*FlowGetResponse, error)
+        DeleteFlow(ctx context.Context, account *models.WhatsAppAccount, flowID string) error
+        CreateFlow(ctx context.Context, account *models.WhatsAppAccount, name string, categories []string) (string, error)
+        UpdateFlowJSON(ctx context.Context, account *models.WhatsAppAccount, flowID string, flowJSON *FlowJSON) error
+        PublishFlow(ctx context.Context, account *models.WhatsAppAccount, flowID string) error
+        DeprecateFlow(ctx context.Context, account *models.WhatsAppAccount, flowID string) error
+        ListFlows(ctx context.Context, account *models.WhatsAppAccount) ([]FlowGetResponse, error)
+        GetFlowAssets(ctx context.Context, account *models.WhatsAppAccount, flowID string) (*FlowJSON, error)
+
+        // Templates
+        SubmitTemplate(ctx context.Context, account *models.WhatsAppAccount, template *TemplateSubmission) (string, error)
+        FetchTemplates(ctx context.Context, account *models.WhatsAppAccount) ([]MetaTemplate, error)
+        DeleteTemplate(ctx context.Context, account *models.WhatsAppAccount, templateName string) error
+
+        // Analytics
+        GetAnalytics(ctx context.Context, account *models.WhatsAppAccount, analyticsType AnalyticsType, req *AnalyticsRequest) (*MetaAnalyticsResponse, error)
 }
 
 // TemplateCard represents a card in a Meta template component (for carousels)

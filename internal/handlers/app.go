@@ -5,11 +5,13 @@ import (
         "errors"
         "net/http"
         "sync"
+        "time"
 
         "github.com/google/uuid"
         "github.com/redis/go-redis/v9"
         "github.com/shridarpatil/whatomate/internal/config"
         "github.com/shridarpatil/whatomate/internal/intelligence"
+        "github.com/shridarpatil/whatomate/internal/models"
         "github.com/shridarpatil/whatomate/internal/queue"
         "github.com/shridarpatil/whatomate/internal/websocket"
         "github.com/shridarpatil/whatomate/pkg/whatsapp"
@@ -260,4 +262,12 @@ func (a *App) decodeRequest(r *fastglue.Request, v interface{}) error {
                 return errEnvelopeSent
         }
         return nil
+}
+
+// toWhatsAppAccount returns a *models.WhatsAppAccount with BaseURL populated from config if not already set.
+func (a *App) toWhatsAppAccount(account *models.WhatsAppAccount) *models.WhatsAppAccount {
+        if account.BaseURL == "" && a.Config != nil && a.Config.WhatsApp.BaseURL != "" {
+                account.BaseURL = a.Config.WhatsApp.BaseURL
+        }
+        return account
 }

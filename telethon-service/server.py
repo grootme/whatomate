@@ -376,6 +376,27 @@ async def send_message(req: SendRequest):
         raise HTTPException(500, str(e))
 
 
+class SendFileRequest(BaseModel):
+    chat_id: int
+    file_path: str
+    caption: Optional[str] = None
+
+
+@app.post('/send-file')
+async def send_file(req: SendFileRequest):
+    """Send a file as the Telegram user to a specific chat."""
+    if not telethon_client.connected:
+        result = await telethon_client.connect()
+        if result.get('status') not in ('connected', 'already_connected'):
+            raise HTTPException(503, 'Telegram not connected')
+
+    try:
+        result = await telethon_client.send_file(req.chat_id, req.file_path, req.caption)
+        return result
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+
 @app.post('/command')
 async def process_command(req: CommandRequest):
     """

@@ -477,8 +477,8 @@ func (w *WhatsmeowClientAdapter) DownloadMedia(ctx context.Context, mediaURL str
         return nil, fmt.Errorf("DownloadMedia requires a whatsmeow.Download call with proper message info")
 }
 
-// DownloadMediaCustom is a helper for whatsmeow specific downloads
-func (w *WhatsmeowClientAdapter) DownloadMediaCustom(ctx context.Context, account *models.WhatsAppAccount, msg *events.Message) ([]byte, error) {
+// DownloadMediaCustomEvents is a helper for whatsmeow specific downloads
+func (w *WhatsmeowClientAdapter) DownloadMediaCustomEvents(ctx context.Context, account *models.WhatsAppAccount, msg *events.Message) ([]byte, error) {
         client, err := w.GetClient(account)
         if err != nil {
                 return nil, err
@@ -627,6 +627,91 @@ func (w *WhatsmeowClientAdapter) CloseSession(ctx context.Context, account *mode
         delete(w.clients, account.Name)
         w.log.Info("Whatsmeow client session closed.", "account", account.Name)
         return nil
+}
+
+// DownloadMediaCustom implements the ClientInterface method for whatsmeow
+func (w *WhatsmeowClientAdapter) DownloadMediaCustom(ctx context.Context, account *models.WhatsAppAccount, msg interface{}) ([]byte, error) {
+        eventsMsg, ok := msg.(*events.Message)
+        if !ok {
+                return nil, fmt.Errorf("DownloadMediaCustom: expected *events.Message, got %T", msg)
+        }
+        return w.DownloadMediaCustomEvents(ctx, account, eventsMsg)
+}
+
+// Catalog stubs (not supported by whatsmeow)
+func (w *WhatsmeowClientAdapter) CreateCatalog(ctx context.Context, account *models.WhatsAppAccount, name string) (string, error) {
+        return "", fmt.Errorf("CreateCatalog not supported by whatsmeow adapter")
+}
+
+func (w *WhatsmeowClientAdapter) DeleteCatalog(ctx context.Context, account *models.WhatsAppAccount, catalogID string) error {
+        return fmt.Errorf("DeleteCatalog not supported by whatsmeow adapter")
+}
+
+func (w *WhatsmeowClientAdapter) ListCatalogs(ctx context.Context, account *models.WhatsAppAccount) ([]CatalogInfo, error) {
+        return nil, fmt.Errorf("ListCatalogs not supported by whatsmeow adapter")
+}
+
+func (w *WhatsmeowClientAdapter) CreateProduct(ctx context.Context, account *models.WhatsAppAccount, catalogID string, product *ProductInput) (string, error) {
+        return "", fmt.Errorf("CreateProduct not supported by whatsmeow adapter")
+}
+
+func (w *WhatsmeowClientAdapter) UpdateProduct(ctx context.Context, account *models.WhatsAppAccount, productID string, product *ProductInput) error {
+        return fmt.Errorf("UpdateProduct not supported by whatsmeow adapter")
+}
+
+func (w *WhatsmeowClientAdapter) DeleteProduct(ctx context.Context, account *models.WhatsAppAccount, productID string) error {
+        return fmt.Errorf("DeleteProduct not supported by whatsmeow adapter")
+}
+
+// Flow stubs (not supported by whatsmeow)
+func (w *WhatsmeowClientAdapter) GetFlow(ctx context.Context, account *models.WhatsAppAccount, flowID string) (*FlowGetResponse, error) {
+        return nil, fmt.Errorf("GetFlow not supported by whatsmeow adapter")
+}
+
+func (w *WhatsmeowClientAdapter) DeleteFlow(ctx context.Context, account *models.WhatsAppAccount, flowID string) error {
+        return fmt.Errorf("DeleteFlow not supported by whatsmeow adapter")
+}
+
+func (w *WhatsmeowClientAdapter) CreateFlow(ctx context.Context, account *models.WhatsAppAccount, name string, categories []string) (string, error) {
+        return "", fmt.Errorf("CreateFlow not supported by whatsmeow adapter")
+}
+
+func (w *WhatsmeowClientAdapter) UpdateFlowJSON(ctx context.Context, account *models.WhatsAppAccount, flowID string, flowJSON *FlowJSON) error {
+        return fmt.Errorf("UpdateFlowJSON not supported by whatsmeow adapter")
+}
+
+func (w *WhatsmeowClientAdapter) PublishFlow(ctx context.Context, account *models.WhatsAppAccount, flowID string) error {
+        return fmt.Errorf("PublishFlow not supported by whatsmeow adapter")
+}
+
+func (w *WhatsmeowClientAdapter) DeprecateFlow(ctx context.Context, account *models.WhatsAppAccount, flowID string) error {
+        return fmt.Errorf("DeprecateFlow not supported by whatsmeow adapter")
+}
+
+func (w *WhatsmeowClientAdapter) ListFlows(ctx context.Context, account *models.WhatsAppAccount) ([]FlowGetResponse, error) {
+        return nil, fmt.Errorf("ListFlows not supported by whatsmeow adapter")
+}
+
+func (w *WhatsmeowClientAdapter) GetFlowAssets(ctx context.Context, account *models.WhatsAppAccount, flowID string) (*FlowJSON, error) {
+        return nil, fmt.Errorf("GetFlowAssets not supported by whatsmeow adapter")
+}
+
+// Template stubs (not supported by whatsmeow)
+func (w *WhatsmeowClientAdapter) SubmitTemplate(ctx context.Context, account *models.WhatsAppAccount, template *TemplateSubmission) (string, error) {
+        return "", fmt.Errorf("SubmitTemplate not supported by whatsmeow adapter")
+}
+
+func (w *WhatsmeowClientAdapter) FetchTemplates(ctx context.Context, account *models.WhatsAppAccount) ([]MetaTemplate, error) {
+        return nil, fmt.Errorf("FetchTemplates not supported by whatsmeow adapter")
+}
+
+func (w *WhatsmeowClientAdapter) DeleteTemplate(ctx context.Context, account *models.WhatsAppAccount, templateName string) error {
+        return fmt.Errorf("DeleteTemplate not supported by whatsmeow adapter")
+}
+
+// Analytics stub (not supported by whatsmeow)
+func (w *WhatsmeowClientAdapter) GetAnalytics(ctx context.Context, account *models.WhatsAppAccount, analyticsType AnalyticsType, req *AnalyticsRequest) (*MetaAnalyticsResponse, error) {
+        return nil, fmt.Errorf("GetAnalytics not supported by whatsmeow adapter")
 }
 
 func (w *WhatsmeowClientAdapter) eventHandler(client *whatsmeow.Client, account *models.WhatsAppAccount) func(evt interface{}) {
