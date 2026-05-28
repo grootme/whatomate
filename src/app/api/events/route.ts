@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { fetchService } from '@/lib/intelligence/service-client';
+import { withAuth } from '@/lib/intelligence/auth';
 
 /**
  * GET /api/events
@@ -7,8 +9,17 @@ import { db } from '@/lib/db';
  * Returns recent IntelligenceEvents from DB, formatted as EventBusEvent objects
  * for the real-time event bus display in the multiagent view.
  */
-export async function GET() {
+async function _GET() {
   try {
+    // ===== Try Go backend first =====
+    const goResult = await fetchService<Record<string, unknown>>('goBackend', '/events');
+    if (!goResult.error && goResult.data) {
+      return NextResponse.json(goResult.data);
+    }
+
+    // ===== Fallback to local Next.js intelligence engine =====
+    console.warn('[api/events] Go backend unavailable, using local fallback:', goResult.error);
+
     const events = await db.intelligenceEvent.findMany({
       orderBy: { timestamp: 'desc' },
       take: 50,
@@ -109,15 +120,12 @@ export async function GET() {
         payload = {};
       }
 
-      const ts = e.timestamp;
-      const timeStr = `${ts.getHours().toString().padStart(2, '0')}:${ts.getMinutes().toString().padStart(2, '0')}:${ts.getSeconds().toString().padStart(2, '0')}`;
-
       return {
         id: e.id,
         source: eventSource(e.eventType, payload),
         target: eventTarget(e.eventType),
         type: e.eventType,
-        timestamp: timeStr,
+        timestamp: e.timestamp.toISOString(),
         data: eventSummary(e.eventType, payload),
       };
     });
@@ -125,6 +133,11 @@ export async function GET() {
     return NextResponse.json(formatted);
   } catch (error) {
     console.error('[/api/events] Error fetching events:', error);
-    return NextResponse.json([], { status: 200 });
+    return NextResponse.json(
+      { error: 'Internal server error fetching events' },
+      { status: 500 },
+    );
   }
 }
+
+export const GET = withAuth(_GET);

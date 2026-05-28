@@ -19,6 +19,100 @@ const alertRingBufferSize = 1000
 // alertDedupWindow is the time window for alert deduplication
 const alertDedupWindow = 15 * time.Minute
 
+// SeverityRateLimits defines the maximum number of alerts per severity level per hour
+var SeverityRateLimits = map[string]int{
+        "CRÍTICA": 10,
+        "ALTA":    25,
+        "MEDIA":   50,
+        "BAJA":    100,
+}
+
+// severityRateLimitWindow is the rolling window for per-severity rate limiting
+const severityRateLimitWindow = 1 * time.Hour
+
+// SeverityRateLimiter tracks alert counts per severity level within a rolling time window
+// to prevent alert fatigue.
+type SeverityRateLimiter struct {
+        counts   map[string][]time.Time // severity -> list of alert timestamps
+        limits   map[string]int         // severity -> max alerts per hour
+        mu       sync.Mutex
+}
+
+// NewSeverityRateLimiter creates a new per-severity rate limiter
+func NewSeverityRateLimiter(limits map[string]int) *SeverityRateLimiter {
+        return &SeverityRateLimiter{
+                counts: make(map[string][]time.Time),
+                limits: limits,
+        }
+}
+
+// Allow checks if an alert of the given severity is allowed within the rate limit.
+// Returns true if the alert is within the rate limit, false if it should be suppressed.
+func (srl *SeverityRateLimiter) Allow(severity string) bool {
+        srl.mu.Lock()
+        defer srl.mu.Unlock()
+
+        limit, ok := srl.limits[severity]
+        if !ok {
+                // Unknown severity — allow by default
+                return true
+        }
+
+        now := time.Now()
+        cutoff := now.Add(-severityRateLimitWindow)
+
+        // Prune old entries
+        timestamps := srl.counts[severity]
+        var active []time.Time
+        for _, t := range timestamps {
+                if t.After(cutoff) {
+                        active = append(active, t)
+                }
+        }
+        srl.counts[severity] = active
+
+        if len(active) >= limit {
+                return false // Rate limit exceeded
+        }
+
+        // Record this alert
+        srl.counts[severity] = append(srl.counts[severity], now)
+        return true
+}
+
+// GetCounts returns the current alert counts per severity within the rate limit window
+func (srl *SeverityRateLimiter) GetCounts() map[string]int {
+        srl.mu.Lock()
+        defer srl.mu.Unlock()
+
+        now := time.Now()
+        cutoff := now.Add(-severityRateLimitWindow)
+
+        result := make(map[string]int)
+        for severity, timestamps := range srl.counts {
+                count := 0
+                for _, t := range timestamps {
+                        if t.After(cutoff) {
+                                count++
+                        }
+                }
+                result[severity] = count
+        }
+        return result
+}
+
+// GetLimits returns the configured rate limits per severity
+func (srl *SeverityRateLimiter) GetLimits() map[string]int {
+        srl.mu.Lock()
+        defer srl.mu.Unlock()
+
+        result := make(map[string]int)
+        for k, v := range srl.limits {
+                result[k] = v
+        }
+        return result
+}
+
 // MonitoringEngine implements DNA Layer 3: Alert Workflow & Monitoring
 type MonitoringEngine struct {
         eventStore *EventStore
@@ -29,6 +123,7 @@ type MonitoringEngine struct {
         alertRing  []Alert                  // Ring buffer for ordered storage (max 1000)
         alertRingPos int                    // Write position in ring buffer
         alertDedup map[string]time.Time     // fingerprint -> last alert time for dedup
+        rateLimiter *SeverityRateLimiter    // per-severity rate limiter to prevent alert fatigue
         mu         sync.RWMutex
 }
 
@@ -43,6 +138,7 @@ func NewMonitoringEngine(es *EventStore, rdb *redis.Client, log logf.Logger) *Mo
                 alertRing:    make([]Alert, 0, alertRingBufferSize),
                 alertRingPos: 0,
                 alertDedup:   make(map[string]time.Time),
+                rateLimiter:  NewSeverityRateLimiter(SeverityRateLimits),
         }
 
         // Initialize default agents
@@ -150,6 +246,14 @@ func (me *MonitoringEngine) GenerateAlert(result StrategyResult) Alert {
                         me.log.Info("Alert deduplicated", "fingerprint", fingerprint, "lastSeen", lastTime)
                         return Alert{ID: "", Fingerprint: fingerprint}
                 }
+        }
+
+        // Check per-severity rate limit to prevent alert fatigue
+        if !me.rateLimiter.Allow(result.Severity) {
+                me.mu.Unlock()
+                me.log.Info("Alert rate limited by severity", "severity", result.Severity,
+                        "title", me.generateAlertTitle(result))
+                return Alert{ID: "", Fingerprint: fingerprint}
         }
 
         alert := Alert{
@@ -449,6 +553,15 @@ func (me *MonitoringEngine) GetActiveAlertCount() int {
                 }
         }
         return count
+}
+
+// GetRateLimitStats returns the current per-severity rate limit counts and configured limits
+func (me *MonitoringEngine) GetRateLimitStats() map[string]interface{} {
+        return map[string]interface{}{
+                "counts": me.rateLimiter.GetCounts(),
+                "limits": me.rateLimiter.GetLimits(),
+                "window": severityRateLimitWindow.String(),
+        }
 }
 
 // GetCriticalAlertCount returns the count of critical severity alerts

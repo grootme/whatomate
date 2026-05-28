@@ -3,6 +3,7 @@ package intelligence
 import (
         "context"
         "fmt"
+        "math"
         "sort"
         "sync"
         "time"
@@ -105,6 +106,7 @@ func (ce *CorrelationEngineV2) MultiMethodCorrelate(ctx context.Context, entitie
         jaccardResults := ce.jaccardCorrelation(entities)
         comentionResults := ce.coMentionCorrelation(entities, messages)
         temporalResults := ce.temporalCorrelation(entities, messages)
+        geospatialResults := ce.geospatialCorrelation(entities)
 
         // Merge results by entity pair
         pairMap := make(map[string]*EnhancedCorrelationResult)
@@ -125,7 +127,7 @@ func (ce *CorrelationEngineV2) MultiMethodCorrelate(ctx context.Context, entitie
                                 })
                                 // Weighted average: more methods = higher confidence
                                 existing.Similarity = (existing.Similarity + r.Similarity) / 2
-                                existing.Confidence = float64(len(existing.Methods)) / 3.0 // 3 total methods
+                                existing.Confidence = float64(len(existing.Methods)) / 4.0 // 4 total methods (incl. geospatial)
                                 if existing.Confidence > 1.0 {
                                         existing.Confidence = 1.0
                                 }
@@ -135,7 +137,7 @@ func (ce *CorrelationEngineV2) MultiMethodCorrelate(ctx context.Context, entitie
                                         EntityB:    r.EntityB,
                                         Similarity: r.Similarity,
                                         Methods:    []CorrelationMethod{method},
-                                        Confidence: 1.0 / 3.0,
+                                        Confidence: 1.0 / 4.0,
                                         Evidence: []CorrelationEvidence{
                                                 {
                                                         Method:      method,
@@ -152,6 +154,7 @@ func (ce *CorrelationEngineV2) MultiMethodCorrelate(ctx context.Context, entitie
         mergeResults(jaccardResults, CorrelationMethodJaccard)
         mergeResults(comentionResults, CorrelationMethodCoMention)
         mergeResults(temporalResults, CorrelationMethodTemporal)
+        mergeResults(geospatialResults, CorrelationMethodGeospatial)
 
         // Filter to only high-confidence correlations
         var results []EnhancedCorrelationResult
@@ -249,6 +252,67 @@ func (ce *CorrelationEngineV2) jaccardCorrelation(entities []Entity) []Correlati
 func (ce *CorrelationEngineV2) coMentionCorrelation(entities []Entity, messages []RawMessage) []CorrelationResult {
         origEngine := &CorrelationEngine{eventStore: ce.eventStore, log: ce.log}
         return origEngine.FindComentions(context.Background(), entities, messages)
+}
+
+// geospatialCorrelation correlates entities that are near the same geographic location.
+// It uses the Lat/Lon fields on entities (if available) and applies the Haversine
+// formula to compute great-circle distance. Entities within a configurable proximity
+// threshold (default 50 km) receive a similarity score that decays with distance.
+const geospatialProximityKm = 50.0
+
+func (ce *CorrelationEngineV2) geospatialCorrelation(entities []Entity) []CorrelationResult {
+        var results []CorrelationResult
+
+        // Collect only entities that have valid lat/lon
+        type geoEntity struct {
+                id  string
+                lat float64
+                lon float64
+        }
+        var geoEntities []geoEntity
+        for _, e := range entities {
+                if e.Lat != 0 || e.Lon != 0 {
+                        geoEntities = append(geoEntities, geoEntity{id: e.ID, lat: e.Lat, lon: e.Lon})
+                }
+        }
+
+        // Pairwise Haversine comparison
+        for i := 0; i < len(geoEntities); i++ {
+                for j := i + 1; j < len(geoEntities); j++ {
+                        dist := haversineDistance(geoEntities[i].lat, geoEntities[i].lon, geoEntities[j].lat, geoEntities[j].lon)
+                        if dist <= geospatialProximityKm {
+                                // Similarity decays linearly from 1.0 (same point) to 0.0 (at threshold)
+                                similarity := 1.0 - (dist / geospatialProximityKm)
+                                if similarity > 0.2 {
+                                        results = append(results, CorrelationResult{
+                                                EntityA:    geoEntities[i].id,
+                                                EntityB:    geoEntities[j].id,
+                                                Similarity: similarity,
+                                                Method:     "geospatial",
+                                        })
+                                }
+                        }
+                }
+        }
+
+        return results
+}
+
+// haversineDistance computes the great-circle distance between two lat/lon points in km.
+func haversineDistance(lat1, lon1, lat2, lon2 float64) float64 {
+        const earthRadiusKm = 6371.0
+
+        lat1Rad := lat1 * math.Pi / 180.0
+        lat2Rad := lat2 * math.Pi / 180.0
+        deltaLat := (lat2 - lat1) * math.Pi / 180.0
+        deltaLon := (lon2 - lon1) * math.Pi / 180.0
+
+        a := math.Sin(deltaLat/2)*math.Sin(deltaLat/2) +
+                math.Cos(lat1Rad)*math.Cos(lat2Rad)*
+                        math.Sin(deltaLon/2)*math.Sin(deltaLon/2)
+        c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
+
+        return earthRadiusKm * c
 }
 
 // temporalCorrelation performs temporal proximity correlation

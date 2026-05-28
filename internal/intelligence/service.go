@@ -34,6 +34,7 @@ type IntelligenceService struct {
         osintCache              *OSINTCache
         alertNotifier           *AlertNotifier
         healthAggregator        *HealthCheckAggregator
+        eventReplayService      *EventReplayService
 
         db         *gorm.DB
         redis      *redis.Client
@@ -108,6 +109,7 @@ func NewIntelligenceService(db *gorm.DB, rdb *redis.Client, httpClient *http.Cli
         service.osintCache = NewOSINTCache(rdb, log, 5*time.Minute)
         service.alertNotifier = NewAlertNotifier(rdb, log)
         service.healthAggregator = NewHealthCheckAggregator(service, log)
+        service.eventReplayService = NewEventReplayService(eventStore, log)
 
         return service
 }
@@ -466,6 +468,13 @@ func (is *IntelligenceService) GenerateReport(ctx context.Context, reportType st
                 dashboard := is.GetDashboardData(ctx)
                 osintData := is.osintClient.GetLastSnapshot()
                 return is.reports.GenerateFullReport(ctx, &dashboard, osintData)
+
+        case "maritime_threat":
+                osintData := is.osintClient.GetLastSnapshot()
+                if osintData == nil {
+                        osintData = &OSINTSnapshot{}
+                }
+                return is.reports.GenerateMaritimeThreatReport(ctx, *osintData)
 
         default:
                 return nil, fmt.Errorf("unknown report type: %s", reportType)
@@ -956,6 +965,11 @@ func (is *IntelligenceService) GetRecentEvents(ctx context.Context, stream strin
 // ReplayEvents replays events from a given timestamp
 func (is *IntelligenceService) ReplayEvents(ctx context.Context, stream string, from time.Time, count int) ([]IntelligenceEvent, error) {
         return is.eventStore.ReplayEvents(ctx, stream, from, count)
+}
+
+// GetEventReplayService returns the event replay service
+func (is *IntelligenceService) GetEventReplayService() *EventReplayService {
+        return is.eventReplayService
 }
 
 // GetPredictions returns predictions from the predictive strategy

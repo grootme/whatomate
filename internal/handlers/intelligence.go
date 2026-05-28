@@ -3,6 +3,8 @@ package handlers
 import (
         "context"
         "fmt"
+        "log"
+        "sort"
         "strconv"
         "time"
 
@@ -66,17 +68,20 @@ func (a *App) GetIntelEventsReplay(r *fastglue.Request) error {
 
         stream := string(r.RequestCtx.QueryArgs().Peek("stream"))
         if stream == "" {
-                stream = intelligence.StreamIntelEvents
+                stream = "all"
         }
 
         fromStr := string(r.RequestCtx.QueryArgs().Peek("from"))
-        if fromStr == "" {
-                return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Missing 'from' parameter (RFC3339 format)", nil, "")
-        }
-
-        from, err := time.Parse(time.RFC3339, fromStr)
-        if err != nil {
-                return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid 'from' timestamp format", nil, "")
+        var from time.Time
+        if fromStr != "" {
+                var err error
+                from, err = time.Parse(time.RFC3339, fromStr)
+                if err != nil {
+                        return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Invalid 'from' timestamp format (expected RFC3339)", nil, "")
+                }
+        } else {
+                // Default to 24 hours ago if no from parameter provided
+                from = time.Now().Add(-24 * time.Hour)
         }
 
         countStr := string(r.RequestCtx.QueryArgs().Peek("count"))
@@ -88,6 +93,48 @@ func (a *App) GetIntelEventsReplay(r *fastglue.Request) error {
         }
 
         ctx := context.Background()
+
+        // When stream is "all", replay from ALL intelligence streams
+        if stream == "all" {
+                replayService := a.IntelService.GetEventReplayService()
+                if replayService == nil {
+                        return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable, "Event replay service not initialized", nil, "")
+                }
+
+                allResults, err := replayService.ReplayAllStreams(ctx, from, count)
+                if err != nil {
+                        return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to replay events from all streams", nil, "")
+                }
+
+                // Aggregate all events across streams into a single timeline
+                var allEvents []intelligence.IntelligenceEvent
+                streamSummary := make(map[string]int)
+                for streamName, result := range allResults {
+                        streamSummary[streamName] = len(result.Events)
+                        allEvents = append(allEvents, result.Events...)
+                }
+
+                // Sort combined events by timestamp descending
+                sort.Slice(allEvents, func(i, j int) bool {
+                        return allEvents[i].Timestamp.After(allEvents[j].Timestamp)
+                })
+
+                // Limit to requested count
+                if len(allEvents) > count {
+                        allEvents = allEvents[:count]
+                }
+
+                return r.SendEnvelope(map[string]interface{}{
+                        "stream":         "all",
+                        "from":           from,
+                        "count":          len(allEvents),
+                        "events":         allEvents,
+                        "streamsScanned": len(allResults),
+                        "streamSummary":  streamSummary,
+                })
+        }
+
+        // Single stream replay (original behavior)
         events, err := a.IntelService.ReplayEvents(ctx, stream, from, count)
         if err != nil {
                 return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to replay events", nil, "")
@@ -380,13 +427,13 @@ func (a *App) GetIntelNotifications(r *fastglue.Request) error {
         }
 
         ctx := context.Background()
-        alerts := a.IntelService.GetAlerts(ctx, 20)
+        allAlerts := a.IntelService.GetAlerts(ctx, 20)
 
         // Filter to unacknowledged alerts (notifications)
         var notifications []intelligence.Alert
-        for _, a := range alerts {
-                if !a.Acknowledged {
-                        notifications = append(notifications, a)
+        for _, alert := range allAlerts {
+                if !alert.Acknowledged {
+                        notifications = append(notifications, alert)
                 }
         }
 
@@ -421,7 +468,7 @@ func (a *App) GenerateIntelReport(r *fastglue.Request) error {
         }
 
         var req struct {
-                Type string `json:"type"` // "threat_summary", "risk_analysis", "pattern_report", "full_intelligence"
+                Type string `json:"type"` // "threat_summary", "risk_analysis", "pattern_report", "full_intelligence", "maritime_threat"
         }
 
         if err := a.decodeRequest(r, &req); err != nil {
@@ -477,10 +524,8 @@ func (a *App) GetIntelStrategies(r *fastglue.Request) error {
         }
 
         signalMap := make(map[string]*intelligence.StrategyResult)
-        for i, s := range signals {
-                if i < len(strategies) {
-                        signalMap[strategies[i].ID()] = s
-                }
+        for _, s := range signals {
+                signalMap[s.StrategyID] = s
         }
 
         var infos []strategyInfo
@@ -614,11 +659,17 @@ func (a *App) GetIntelCorrelations(r *fastglue.Request) error {
         ctx := context.Background()
 
         // Run analysis to get recent messages
-        results, _ := a.IntelService.RunAnalysis(ctx)
+        results, err := a.IntelService.RunAnalysis(ctx)
+        if err != nil {
+                log.Printf("[intelligence] RunAnalysis failed in GetIntelCorrelations: %v", err)
+        }
         _ = results
 
         // Get OSINT data
-        osintData, _ := a.IntelService.FetchOSINTData(ctx)
+        osintData, err := a.IntelService.FetchOSINTData(ctx)
+        if err != nil {
+                log.Printf("[intelligence] FetchOSINTData failed in GetIntelCorrelations: %v", err)
+        }
         if osintData == nil {
                 osintData = a.IntelService.GetOSINTCache().GetSnapshot(ctx)
         }
@@ -631,7 +682,10 @@ func (a *App) GetIntelCorrelations(r *fastglue.Request) error {
         }
 
         // Get recent telegram messages
-        events, _ := a.IntelService.GetRecentEvents(ctx, "whatomate:telegram_messages", 50)
+        events, err := a.IntelService.GetRecentEvents(ctx, "whatomate:telegram_messages", 50)
+        if err != nil {
+                log.Printf("[intelligence] GetRecentEvents failed in GetIntelCorrelations: %v", err)
+        }
         var messages []intelligence.RawMessage
         for _, event := range events {
                 msg := intelligence.RawMessage{

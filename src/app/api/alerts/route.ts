@@ -58,141 +58,151 @@ async function _GET() {
 }
 
 async function _POST(request: Request) {
-  const body = await request.json();
+  try {
+    const body = await request.json();
 
-  const alert = await db.alert.create({
-    data: {
-      source: body.source,
-      severity: body.severity,
-      title: body.title,
-      description: body.description,
-      actionTaken: body.actionTaken,
-      strategy: body.strategy || 'threshold',
-      thresholdId: body.thresholdId,
-      patternId: body.patternId,
-    },
-  });
+    const alert = await db.alert.create({
+      data: {
+        source: body.source,
+        severity: body.severity,
+        title: body.title,
+        description: body.description,
+        actionTaken: body.actionTaken,
+        strategy: body.strategy || 'threshold',
+        thresholdId: body.thresholdId,
+        patternId: body.patternId,
+      },
+    });
 
-  // Persist alert creation event via persistEvent (handles Redis + SQLite)
-  await persistEvent('whatomate:alerts', {
-    eventType: 'monitoring.alert_generated',
-    aggregateId: alert.id,
-    aggregateType: 'alert',
-    payload: {
-      source: alert.source,
-      severity: alert.severity,
-      title: alert.title,
-      strategy: alert.strategy,
-    },
-    metadata: { alertCreated: true },
-  });
+    // Persist alert creation event via persistEvent (handles Redis + SQLite)
+    await persistEvent('whatomate:alerts', {
+      eventType: 'monitoring.alert_generated',
+      aggregateId: alert.id,
+      aggregateType: 'alert',
+      payload: {
+        source: alert.source,
+        severity: alert.severity,
+        title: alert.title,
+        strategy: alert.strategy,
+      },
+      metadata: { alertCreated: true },
+    });
 
-  return NextResponse.json(alert, { status: 201 });
+    return NextResponse.json(alert, { status: 201 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to create alert';
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }
 
 async function _PATCH(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const alertId = searchParams.get('id');
-  const body = await request.json();
+  try {
+    const { searchParams } = new URL(request.url);
+    const alertId = searchParams.get('id');
+    const body = await request.json();
 
-  if (!alertId) {
-    return NextResponse.json({ error: 'Alert ID required' }, { status: 400 });
-  }
+    if (!alertId) {
+      return NextResponse.json({ error: 'Alert ID required' }, { status: 400 });
+    }
 
-  const alert = await db.alert.update({
-    where: { id: alertId },
-    data: {
-      acknowledged: body.acknowledged,
-      acknowledgedBy: body.acknowledgedBy,
-      acknowledgedAt: body.acknowledged ? new Date() : undefined,
-      escalated: body.escalated,
-    },
-  });
-
-  const eventIds: string[] = [];
-
-  // ===== When acknowledging: persist event via persistEvent =====
-  if (body.acknowledged) {
-    const ackEventId = await persistEvent('whatomate:alerts', {
-      eventType: 'monitoring.alert_acknowledged',
-      aggregateId: alertId,
-      aggregateType: 'alert',
-      payload: {
-        alertId,
-        severity: alert.severity,
-        title: alert.title,
+    const alert = await db.alert.update({
+      where: { id: alertId },
+      data: {
+        acknowledged: body.acknowledged,
         acknowledgedBy: body.acknowledgedBy,
-        strategy: alert.strategy,
+        acknowledgedAt: body.acknowledged ? new Date() : undefined,
+        escalated: body.escalated,
       },
-      metadata: { acknowledgedBy: body.acknowledgedBy },
     });
 
-    eventIds.push(ackEventId);
-  }
+    const eventIds: string[] = [];
 
-  // ===== When escalating: persist event via persistEvent AND run consensus strategy =====
-  if (body.escalated) {
-    const escEventId = await persistEvent('whatomate:alerts', {
-      eventType: 'monitoring.alert_escalated',
-      aggregateId: alertId,
-      aggregateType: 'alert',
-      payload: {
-        alertId,
-        severity: alert.severity,
-        title: alert.title,
-        strategy: alert.strategy,
-        escalatedBy: body.acknowledgedBy,
-      },
-      metadata: { escalated: true, escalatedBy: body.acknowledgedBy },
-    });
-
-    eventIds.push(escEventId);
-
-    // Run the consensus strategy to get multi-agent opinion on this escalated alert
-    try {
-      const context = await buildStrategyContext();
-      const consensusResult = await strategyRegistry.evaluateWith('consensus', context);
-
-      // Persist consensus decision event via persistEvent
-      const consensusEventId = await persistEvent('whatomate:decisions', {
-        eventType: 'consensus.decision_made',
+    // ===== When acknowledging: persist event via persistEvent =====
+    if (body.acknowledged) {
+      const ackEventId = await persistEvent('whatomate:alerts', {
+        eventType: 'monitoring.alert_acknowledged',
         aggregateId: alertId,
         aggregateType: 'alert',
         payload: {
           alertId,
-          consensusAction: consensusResult.action,
-          consensusSeverity: consensusResult.severity,
-          consensusConfidence: consensusResult.confidence,
-          consensusReasoning: consensusResult.reasoning,
-          triggeredBy: 'escalation',
+          severity: alert.severity,
+          title: alert.title,
+          acknowledgedBy: body.acknowledgedBy,
+          strategy: alert.strategy,
         },
-        metadata: { strategyId: 'consensus', triggeredByEscalation: true, alertId },
+        metadata: { acknowledgedBy: body.acknowledgedBy },
       });
 
-      eventIds.push(consensusEventId);
-    } catch (err) {
-      console.error('[Alerts] Consensus strategy evaluation on escalation failed:', err);
+      eventIds.push(ackEventId);
     }
+
+    // ===== When escalating: persist event via persistEvent AND run consensus strategy =====
+    if (body.escalated) {
+      const escEventId = await persistEvent('whatomate:alerts', {
+        eventType: 'monitoring.alert_escalated',
+        aggregateId: alertId,
+        aggregateType: 'alert',
+        payload: {
+          alertId,
+          severity: alert.severity,
+          title: alert.title,
+          strategy: alert.strategy,
+          escalatedBy: body.acknowledgedBy,
+        },
+        metadata: { escalated: true, escalatedBy: body.acknowledgedBy },
+      });
+
+      eventIds.push(escEventId);
+
+      // Run the consensus strategy to get multi-agent opinion on this escalated alert
+      try {
+        const context = await buildStrategyContext();
+        const consensusResult = await strategyRegistry.evaluateWith('consensus', context);
+
+        // Persist consensus decision event via persistEvent
+        const consensusEventId = await persistEvent('whatomate:decisions', {
+          eventType: 'consensus.decision_made',
+          aggregateId: alertId,
+          aggregateType: 'alert',
+          payload: {
+            alertId,
+            consensusAction: consensusResult.action,
+            consensusSeverity: consensusResult.severity,
+            consensusConfidence: consensusResult.confidence,
+            consensusReasoning: consensusResult.reasoning,
+            triggeredBy: 'escalation',
+          },
+          metadata: { strategyId: 'consensus', triggeredByEscalation: true, alertId },
+        });
+
+        eventIds.push(consensusEventId);
+      } catch (err) {
+        console.error('[Alerts] Consensus strategy evaluation on escalation failed:', err);
+      }
+    }
+
+    // Update the alert's relatedEvents field with the event IDs
+    if (eventIds.length > 0) {
+      const existingRelated = alert.relatedEvents ? JSON.parse(alert.relatedEvents) : [];
+      const updatedRelated = [...new Set([...existingRelated, ...eventIds])];
+
+      await db.alert.update({
+        where: { id: alertId },
+        data: {
+          relatedEvents: JSON.stringify(updatedRelated),
+        },
+      });
+
+      // Return updated alert with relatedEvents
+      const updatedAlert = await db.alert.findUnique({ where: { id: alertId } });
+      return NextResponse.json(updatedAlert || alert);
+    }
+
+    return NextResponse.json(alert);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to update alert';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
-
-  // Update the alert's relatedEvents field with the event IDs
-  if (eventIds.length > 0) {
-    const existingRelated = alert.relatedEvents ? JSON.parse(alert.relatedEvents) : [];
-    const updatedRelated = [...new Set([...existingRelated, ...eventIds])];
-
-    await db.alert.update({
-      where: { id: alertId },
-      data: {
-        relatedEvents: JSON.stringify(updatedRelated),
-      },
-    });
-
-    // Return updated alert with relatedEvents
-    const updatedAlert = await db.alert.findUnique({ where: { id: alertId } });
-    return NextResponse.json(updatedAlert || alert);
-  }
-
-  return NextResponse.json(alert);
 }
 
 export const GET = withAuth(_GET);

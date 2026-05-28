@@ -160,8 +160,9 @@ func (p *MultiClientProvider) GetMediaURL(ctx context.Context, mediaID string, a
 }
 
 func (p *MultiClientProvider) DownloadMedia(ctx context.Context, mediaURL string, accessToken string) ([]byte, error) {
-        // DownloadMedia is somewhat generic but Meta's needs the token.
-        // For whatsmeow, it might be different. For now, we use Meta adapter's generic logic.
+        // Delegate to Meta adapter for HTTP-based media downloads.
+        // whatsmeow handles media downloads internally via its own download flow
+        // in the message processing pipeline, so this path is primarily for Meta accounts.
         return p.metaAdapter.DownloadMedia(ctx, mediaURL, accessToken)
 }
 

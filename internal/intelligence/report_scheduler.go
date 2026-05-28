@@ -67,6 +67,7 @@ func (rs *ReportScheduler) CreateJob(ctx context.Context, req ScheduleReportRequ
                 "risk_analysis":     true,
                 "pattern_report":    true,
                 "full_intelligence": true,
+                "maritime_threat":   true,
         }
         if !validTypes[req.ReportType] {
                 return nil, fmt.Errorf("invalid report type: %s", req.ReportType)
@@ -234,6 +235,7 @@ func (rs *ReportScheduler) UpdateJob(ctx context.Context, jobID string, req Sche
                         "risk_analysis":     true,
                         "pattern_report":    true,
                         "full_intelligence": true,
+                        "maritime_threat":   true,
                 }
                 if !validTypes[req.ReportType] {
                         rs.mu.Unlock()

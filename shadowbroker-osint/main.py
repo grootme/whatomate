@@ -112,6 +112,64 @@ async def _publish_to_stream(stream: str, fields: dict[str, str]) -> None:
             _redis = None
 
 
+# ── Scraper Health Tracking ──────────────────────────────────────────────────
+_scraper_last_success: dict[str, str] = {}  # scraper_name -> ISO timestamp of last successful fetch
+
+
+def _record_scraper_success(name: str) -> None:
+    """Record a successful scraper fetch timestamp."""
+    _scraper_last_success[name] = datetime.now(tz=timezone.utc).isoformat()
+
+
+# Scraper source health check definitions: name -> (health_check_url, scraper_module_name)
+_SCRAPER_HEALTH_DEFS: dict[str, dict[str, str]] = {
+    "earthquakes": {
+        "url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_day.geojson",
+        "source": "USGS Earthquake Hazards Program",
+    },
+    "fires": {
+        "url": "https://firms.modaps.eosdis.nasa.gov/",
+        "source": "NASA FIRMS",
+    },
+    "flights": {
+        "url": "https://opensky-network.org/api/states/all",
+        "source": "OpenSky Network",
+    },
+    "gdelt": {
+        "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=war&mode=artlist&maxrecords=1&format=json",
+        "source": "GDELT Project",
+    },
+    "gps_jamming": {
+        "url": "https://gpsjam.org/api/v1/current",
+        "source": "GPSJam",
+    },
+    "liveuamap": {
+        "url": "https://liveuamap.com/feed",
+        "source": "LiveUAMap",
+    },
+    "news": {
+        "url": "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
+        "source": "RSS Feeds (BBC, NYT, Al Jazeera)",
+    },
+    "ships": {
+        "url": "https://www.marinetraffic.com/",
+        "source": "MarineTraffic / Spire Maritime",
+    },
+    "sigint": {
+        "url": "https://map.meshverse.com/api/nodes",
+        "source": "Meshtastic / APRS.fi",
+    },
+    "uavs": {
+        "url": "https://adsbexchange.com/",
+        "source": "ADS-B Exchange",
+    },
+    "weather": {
+        "url": "https://api.weather.gov/alerts?severity=Extreme",
+        "source": "NWS Weather Alerts API",
+    },
+}
+
+
 # ── In-Memory Cache ──────────────────────────────────────────────────────────
 _cache: dict[str, Any] = {}
 _cache_timestamps: dict[str, float] = {}
@@ -226,6 +284,14 @@ def _compute_threat_level(data: dict[str, Any]) -> str:
     if len(sigint_data) >= 50:
         score += 1
 
+    # Maritime activity (ships)
+    ships = data.get("ships", [])
+    military_ships = [s for s in ships if s.get("type", "").lower() in ("warship", "naval", "military")]
+    if len(military_ships) >= 5:
+        score += 1
+    if len(ships) >= 20:
+        score += 1
+
     # Map score to threat level
     if score >= 8:
         return "critical"
@@ -283,7 +349,9 @@ async def _fetch_all_data() -> dict[str, Any]:
     async def _safe(coro, name: str):
         """Run a scraper with a timeout, returning empty result on failure."""
         try:
-            return await asyncio.wait_for(coro, timeout=SCRAPER_TIMEOUT)
+            result = await asyncio.wait_for(coro, timeout=SCRAPER_TIMEOUT)
+            _record_scraper_success(name)
+            return result
         except asyncio.TimeoutError:
             logger.error(f"Scraper {name} timed out after {SCRAPER_TIMEOUT}s")
             return _empty_result_for(name)
@@ -362,17 +430,19 @@ async def _fetch_all_data() -> dict[str, Any]:
         f"news={len(news)}, gdelt={len(gdelt)}, "
         f"wx_alerts={len(weather_alerts)}, "
         f"gps_jamming={len(gps_jamming)}, uavs={len(uavs)}, "
-        f"liveuamap={len(liveuamap)}, sigint={len(sigint)}"
+        f"liveuamap={len(liveuamap)}, sigint={len(sigint)}, "
+        f"ships={len(ships)}"
     )
 
     # Publish data-refreshed event to Redis Stream
     data_json = json.dumps(payload, default=str)
     # Store full data in a Redis key and reference it in the stream event
     # to avoid Redis Stream field size limitations
-    if redis_client:
+    rds = await _get_redis()
+    if rds:
         try:
             data_key = f"whatomate:osint_snapshot:{datetime.now(tz=timezone.utc).strftime('%Y%m%d%H%M%S')}"
-            redis_client.set(data_key, data_json, ex=3600)  # 1 hour TTL
+            await rds.set(data_key, data_json, ex=3600)  # 1 hour TTL
             await _publish_to_stream("whatomate:osint_events", {
                 "event_type": "osint.data_refreshed",
                 "source": "shadowbroker-osint",
@@ -466,6 +536,17 @@ def _generate_summary(data: dict[str, Any]) -> str:
             f"Signals intelligence: {sigint_totals.get('meshtastic', 0)} Meshtastic, "
             f"{sigint_totals.get('aprs', 0)} APRS signals detected."
         )
+
+    # Maritime / Ships
+    ships = data.get("ships", [])
+    if ships:
+        military_ships = [s for s in ships if s.get("type", "").lower() in ("warship", "naval", "military")]
+        parts.append(
+            f"Maritime activity: {len(ships)} vessel(s) tracked, "
+            f"{len(military_ships)} military/naval."
+        )
+    else:
+        parts.append("No maritime vessel tracking data available.")
 
     return " ".join(parts)
 
@@ -626,6 +707,33 @@ def _generate_report(data: dict[str, Any]) -> str:
                 f"  • [{s.get('type', '?').upper()}] {s.get('callsign', 'N/A')} | "
                 f"{s.get('frequency', 'N/A')}"
             )
+    lines.append("")
+
+    # Maritime / Ships
+    lines.append("─" * 40)
+    lines.append("MARITIME / NAVAL INTELLIGENCE")
+    lines.append("─" * 40)
+    ships = data.get("ships", [])
+    if ships:
+        military_ships = [s for s in ships if s.get("type", "").lower() in ("warship", "naval", "military")]
+        lines.append(f"  Total vessels tracked: {len(ships)}")
+        lines.append(f"  Military/Naval vessels: {len(military_ships)}")
+        for s in ships[:15]:
+            ship_type = s.get("type", "unknown")
+            flag = "⚠" if ship_type.lower() in ("warship", "naval", "military") else "○"
+            lines.append(
+                f"  {flag} {s.get('name', 'N/A')} | Type: {ship_type} | "
+                f"Pos: {s.get('lat', 0):.2f},{s.get('lon', 0):.2f} | "
+                f"Speed: {s.get('speed', 0):.1f}kn"
+            )
+        if len(ships) > 15:
+            lines.append(f"  ... and {len(ships) - 15} more vessel(s)")
+        if military_ships:
+            lines.append("")
+            lines.append("  THREAT ADVISORY: Military naval assets detected in monitored zones.")
+            lines.append("  Recommend enhanced surveillance and correlation with SIGINT/GPS data.")
+    else:
+        lines.append("  No maritime vessel data available.")
     lines.append("")
 
     lines.append("=" * 60)
@@ -836,6 +944,74 @@ async def health_check():
         "redis": redis_status,
         "redis_host": REDIS_HOST,
         "redis_port": REDIS_PORT,
+    }
+
+
+@app.get("/api/health/scraper-status")
+async def scraper_status():
+    """Check the health of each OSINT scraper by testing source API reachability.
+
+    Returns per-scraper status (reachable/unreachable), last successful fetch
+    time, and the source API being checked.
+    """
+    client = await _get_client()
+    scrapers_status = {}
+
+    async def _check_scraper(name: str, info: dict[str, str]) -> dict[str, Any]:
+        url = info["url"]
+        source = info["source"]
+        reachable = False
+        response_time_ms: float | None = None
+        error_msg: str | None = None
+
+        try:
+            start = time.monotonic()
+            resp = await client.head(url, timeout=5.0, follow_redirects=True)
+            elapsed = (time.monotonic() - start) * 1000
+            # Accept any 2xx or 3xx (redirects) as reachable; 4xx/5xx may still
+            # indicate the service is up but requires auth / has rate limits
+            if resp.status_code < 500:
+                reachable = True
+                response_time_ms = round(elapsed, 1)
+            else:
+                error_msg = f"HTTP {resp.status_code}"
+        except httpx.TimeoutException:
+            error_msg = "Connection timed out"
+        except httpx.ConnectError as exc:
+            error_msg = f"Connection refused: {exc}"
+        except Exception as exc:
+            error_msg = str(exc)[:200]
+
+        return {
+            "name": name,
+            "source": source,
+            "url": url,
+            "reachable": reachable,
+            "lastSuccessfulFetch": _scraper_last_success.get(name),
+            "responseTimeMs": response_time_ms,
+            "error": error_msg,
+        }
+
+    # Check all scrapers concurrently
+    tasks = [
+        _check_scraper(name, info)
+        for name, info in _SCRAPER_HEALTH_DEFS.items()
+    ]
+    results = await asyncio.gather(*tasks)
+
+    for r in results:
+        scrapers_status[r["name"]] = r
+
+    reachable_count = sum(1 for s in scrapers_status.values() if s["reachable"])
+    total_count = len(scrapers_status)
+
+    return {
+        "status": "ok" if reachable_count == total_count else "degraded",
+        "totalScrapers": total_count,
+        "reachable": reachable_count,
+        "unreachable": total_count - reachable_count,
+        "scrapers": scrapers_status,
+        "checkedAt": datetime.now(tz=timezone.utc).isoformat(),
     }
 
 

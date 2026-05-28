@@ -85,6 +85,8 @@ type Entity struct {
         MentionCount int       `json:"mentionCount"`
         LastSeen     time.Time `json:"lastSeen"`
         Sources      []string  `json:"sources"`
+        Lat          float64   `json:"lat,omitempty"` // Optional geospatial latitude
+        Lon          float64   `json:"lon,omitempty"` // Optional geospatial longitude
 }
 
 // PatternDetection represents a detected pattern
@@ -156,6 +158,7 @@ type ThresholdConfig struct {
 
 // StrategyResult represents the result of a strategy evaluation
 type StrategyResult struct {
+        StrategyID string                 `json:"strategyId"`
         Action     string                 `json:"action"` // "alert", "escalate", "monitor", "dismiss"
         Severity   string                 `json:"severity"`
         Confidence int                    `json:"confidence"`

@@ -14,142 +14,166 @@ const DEFAULT_DIMENSIONS = [
 ];
 
 async function _GET() {
-  // ===== Try Go backend first =====
-  const goResult = await fetchService<Record<string, unknown>>('goBackend', '/strategies');
-  if (!goResult.error && goResult.data) {
-    return NextResponse.json(goResult.data);
-  }
-
-  // ===== Fallback to local Next.js intelligence engine =====
-  console.warn('[api/strategies] Go backend unavailable, using local fallback:', goResult.error);
-
-  // Get real threshold configs from DB
-  const thresholds = await db.thresholdConfig.findMany({
-    where: { enabled: true },
-    orderBy: { name: 'asc' },
-  });
-
-  // Get real pattern detections from DB
-  const patterns = await db.patternDetection.findMany({
-    where: { status: { in: ['active', 'confirmed'] } },
-    orderBy: { lastDetected: 'desc' },
-  });
-
-  // Get real risk assessments from DB
-  const recentRisks = await db.riskAssessment.findMany({
-    orderBy: { createdAt: 'desc' },
-    take: 20,
-  });
-
-  // Get real consensus votes from DB
-  const recentVotes = await db.consensusVote.findMany({
-    orderBy: { createdAt: 'desc' },
-    take: 20,
-  });
-
-  // Get adaptive metrics for evolution tracking
-  const adaptiveHistory = await db.adaptiveMetric.findMany({
-    orderBy: { date: 'desc' },
-    take: 30,
-  });
-
-  // Get predictions
-  const predictions = await db.prediction.findMany({
-    orderBy: { targetTime: 'desc' },
-    take: 24,
-  });
-
-  // Get strategy registry entries
-  const strategyEntries = strategyRegistry.getAll().map(s => ({
-    id: s.id,
-    name: s.name,
-    description: s.description,
-  }));
-
-  // Risk dimensions from DB — seed defaults if table is empty
-  let riskDimensions = await db.riskDimension.findMany({ orderBy: { name: 'asc' } });
-
-  if (riskDimensions.length === 0) {
-    await Promise.all(
-      DEFAULT_DIMENSIONS.map(dim =>
-        db.riskDimension.upsert({
-          where: { name: dim.name },
-          update: {},
-          create: dim,
-        })
-      )
-    );
-    riskDimensions = await db.riskDimension.findMany({ orderBy: { name: 'asc' } });
-  }
-
-  return NextResponse.json({
-    thresholds,
-    patterns,
-    riskDimensions,
-    strategies: strategyEntries,
-    recentRisks,
-    consensusVotes: recentVotes,
-    adaptiveHistory,
-    predictions,
-  });
-}
-
-async function _PUT(request: Request) {
-  // ===== Try Go backend first for write operations =====
   try {
-    const body = await request.json();
-    const goResult = await fetchService<Record<string, unknown>>('goBackend', '/strategies', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
+    // ===== Try Go backend first =====
+    const goResult = await fetchService<Record<string, unknown>>('goBackend', '/strategies');
     if (!goResult.error && goResult.data) {
       return NextResponse.json(goResult.data);
     }
-    console.warn('[api/strategies] Go backend PUT unavailable, using local fallback:', goResult.error);
-  } catch {
-    console.warn('[api/strategies] Go backend PUT failed, using local fallback');
-  }
 
-  // ===== Fallback to local =====
-  const body = await request.json();
+    // ===== Fallback to local Next.js intelligence engine =====
+    console.warn('[api/strategies] Go backend unavailable, using local fallback:', goResult.error);
 
-  // Update threshold configuration
-  if (body.type === 'threshold' && body.id) {
-    const updated = await db.thresholdConfig.update({
-      where: { id: body.id },
-      data: {
-        name: body.name,
-        description: body.description,
-        metric: body.metric,
-        condition: body.condition,
-        value: body.value,
-        unit: body.unit,
-        alertSeverity: body.alertSeverity,
-        alertType: body.alertType,
-        enabled: body.enabled,
-      },
+    // Get real threshold configs from DB
+    const thresholds = await db.thresholdConfig.findMany({
+      where: { enabled: true },
+      orderBy: { name: 'asc' },
     });
-    return NextResponse.json({ message: 'Estrategia actualizada exitosamente', updated });
-  }
 
-  // Update risk dimension weight
-  if (body.type === 'risk_dimension' && body.id) {
-    const updated = await db.riskDimension.update({
-      where: { id: body.id },
-      data: { weight: body.weight },
+    // Get real pattern detections from DB
+    const patterns = await db.patternDetection.findMany({
+      where: { status: { in: ['active', 'confirmed'] } },
+      orderBy: { lastDetected: 'desc' },
     });
-    return NextResponse.json({ message: 'Dimensión de riesgo actualizada', updated });
-  }
 
-  return NextResponse.json({ message: 'Estrategia actualizada exitosamente', updated: body });
+    // Get real risk assessments from DB
+    const recentRisks = await db.riskAssessment.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+
+    // Get real consensus votes from DB
+    const recentVotes = await db.consensusVote.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+
+    // Get adaptive metrics for evolution tracking
+    const adaptiveHistory = await db.adaptiveMetric.findMany({
+      orderBy: { date: 'desc' },
+      take: 30,
+    });
+
+    // Get predictions
+    const predictions = await db.prediction.findMany({
+      orderBy: { targetTime: 'desc' },
+      take: 24,
+    });
+
+    // Get strategy registry entries
+    const strategyEntries = strategyRegistry.getAll().map(s => ({
+      id: s.id,
+      name: s.name,
+      description: s.description,
+    }));
+
+    // Risk dimensions from DB — seed defaults if table is empty
+    let riskDimensions = await db.riskDimension.findMany({ orderBy: { name: 'asc' } });
+
+    if (riskDimensions.length === 0) {
+      await Promise.all(
+        DEFAULT_DIMENSIONS.map(dim =>
+          db.riskDimension.upsert({
+            where: { name: dim.name },
+            update: {},
+            create: dim,
+          })
+        )
+      );
+      riskDimensions = await db.riskDimension.findMany({ orderBy: { name: 'asc' } });
+    }
+
+    return NextResponse.json({
+      thresholds,
+      patterns,
+      riskDimensions,
+      strategies: strategyEntries,
+      recentRisks,
+      consensusVotes: recentVotes,
+      adaptiveHistory,
+      predictions,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to fetch strategies';
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+async function _PUT(request: Request) {
+  try {
+    // Read body once and reuse
+    const bodyText = await request.text();
+    let body: Record<string, unknown>;
+    try {
+      body = JSON.parse(bodyText);
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    }
+
+    // ===== Try Go backend first for write operations =====
+    try {
+      const goResult = await fetchService<Record<string, unknown>>('goBackend', '/strategies', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: bodyText,
+      });
+      if (!goResult.error && goResult.data) {
+        return NextResponse.json(goResult.data);
+      }
+      console.warn('[api/strategies] Go backend PUT unavailable, using local fallback:', goResult.error);
+    } catch {
+      console.warn('[api/strategies] Go backend PUT failed, using local fallback');
+    }
+
+    // ===== Fallback to local =====
+    // Update threshold configuration
+    if (body.type === 'threshold' && body.id) {
+      const updated = await db.thresholdConfig.update({
+        where: { id: body.id as string },
+        data: {
+          name: body.name as string,
+          description: body.description as string,
+          metric: body.metric as string,
+          condition: body.condition as string,
+          value: body.value as number,
+          unit: body.unit as string,
+          alertSeverity: body.alertSeverity as string,
+          alertType: body.alertType as string,
+          enabled: body.enabled as boolean,
+        },
+      });
+      return NextResponse.json({ message: 'Estrategia actualizada exitosamente', updated });
+    }
+
+    // Update risk dimension weight
+    if (body.type === 'risk_dimension' && body.id) {
+      const updated = await db.riskDimension.update({
+        where: { id: body.id as string },
+        data: { weight: body.weight as number },
+      });
+      return NextResponse.json({ message: 'Dimensión de riesgo actualizada', updated });
+    }
+
+    return NextResponse.json({ message: 'Estrategia actualizada exitosamente', updated: body });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Failed to update strategy';
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }
 
 // ===== POST: Execute a strategy evaluation =====
 async function _POST(request: NextRequest) {
+  // Read body once and reuse for both Go proxy and local fallback
+  const bodyText = await request.text();
+  let body: Record<string, unknown>;
+  try {
+    body = JSON.parse(bodyText);
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  }
+
   // ===== Try Go backend first =====
   try {
-    const bodyText = await request.text();
     const goResult = await fetchService<Record<string, unknown>>('goBackend', '/strategies', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -165,7 +189,6 @@ async function _POST(request: NextRequest) {
 
   // ===== Fallback to local =====
   try {
-    const body = await request.json();
     const strategyType = body.type as string;
 
     if (!strategyType) {

@@ -90,6 +90,7 @@ async def fetch_sigint(client: httpx.AsyncClient) -> dict[str, Any]:
                 "time": now_iso,
                 "source": "Known SIGINT Sources",
                 "message": src["description"],
+                "is_fallback": True,
             })
 
     totals = {

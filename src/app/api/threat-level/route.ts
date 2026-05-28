@@ -8,6 +8,7 @@
 import { NextResponse } from 'next/server';
 import { fetchService } from '@/lib/intelligence/service-client';
 import { computeThreatLevel } from '@/lib/intelligence/threat-level';
+import { withAuth } from '@/lib/intelligence/auth';
 
 async function _GET() {
   // ===== Try Go backend first =====
@@ -64,4 +65,5 @@ async function _POST() {
   }
 }
 
-export { _GET as GET, _POST as POST };
+export const GET = withAuth(_GET);
+export const POST = withAuth(_POST);

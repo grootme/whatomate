@@ -11,17 +11,22 @@
  * Features:
  * - Initial connection event with server timestamp
  * - Polls for new events every 5 seconds
+ * - Polls Go backend /alerts endpoint and streams new alerts to clients
  * - Tracks lastSentTimestamp per connection (no DB mutation)
+ * - Tracks sentAlertIds to avoid duplicate alert pushes
  * - Heartbeat keep-alive every 15 seconds
  * - Clean shutdown on client abort
  * - Supports optional `?after=ISO_DATE` query param to resume from a point
  */
 
 import { db } from '@/lib/db';
+import { fetchService } from '@/lib/intelligence/service-client';
 
 const POLL_INTERVAL_MS = 5000;
+const ALERT_POLL_INTERVAL_MS = 8000;
 const HEARTBEAT_INTERVAL_MS = 15000;
 const MAX_EVENTS_PER_POLL = 20;
+const MAX_ALERTS_TO_TRACK = 200;
 
 export async function GET(request: Request) {
   const encoder = new TextEncoder();
@@ -53,6 +58,46 @@ export async function GET(request: Request) {
         // Stream already closed
         return;
       }
+
+      // Track alert IDs already sent to this client to avoid duplicates
+      const sentAlertIds = new Set<string>();
+
+      // Poll the Go backend for new alerts and push them to the SSE stream
+      const alertPollInterval = setInterval(async () => {
+        try {
+          const alertResult = await fetchService<{
+            alerts?: Array<Record<string, unknown> & { id?: string }>
+          }>('goBackend', '/alerts');
+
+          if (!alertResult.error && alertResult.data?.alerts) {
+            for (const alert of alertResult.data.alerts) {
+              const alertId = alert.id ?? JSON.stringify(alert).slice(0, 64);
+              if (sentAlertIds.has(alertId)) continue;
+
+              // Track this alert; evict oldest if set grows too large
+              sentAlertIds.add(alertId);
+              if (sentAlertIds.size > MAX_ALERTS_TO_TRACK) {
+                const oldest = sentAlertIds.values().next().value;
+                if (oldest !== undefined) sentAlertIds.delete(oldest);
+              }
+
+              const sseAlert = {
+                type: 'alert',
+                source: 'go_backend',
+                alert,
+                timestamp: new Date().toISOString(),
+              };
+
+              controller.enqueue(
+                encoder.encode(`data: ${JSON.stringify(sseAlert)}\n\n`)
+              );
+            }
+          }
+        } catch (err) {
+          console.error('[SSE] Alert poll error:', err);
+          // Non-fatal — don't close the stream, just log
+        }
+      }, ALERT_POLL_INTERVAL_MS);
 
       // Poll for new events periodically
       const pollInterval = setInterval(async () => {
@@ -121,6 +166,7 @@ export async function GET(request: Request) {
             // Stream closed, clear interval
             clearInterval(pollInterval);
             clearInterval(heartbeatInterval);
+            clearInterval(alertPollInterval);
           }
         }
       }, POLL_INTERVAL_MS);
@@ -141,6 +187,7 @@ export async function GET(request: Request) {
           // Stream closed
           clearInterval(pollInterval);
           clearInterval(heartbeatInterval);
+          clearInterval(alertPollInterval);
         }
       }, HEARTBEAT_INTERVAL_MS);
 
@@ -148,6 +195,7 @@ export async function GET(request: Request) {
       request.signal.addEventListener('abort', () => {
         clearInterval(pollInterval);
         clearInterval(heartbeatInterval);
+        clearInterval(alertPollInterval);
         try {
           controller.close();
         } catch {

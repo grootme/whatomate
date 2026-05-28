@@ -169,23 +169,23 @@ async def fetch_gps_jamming(client: httpx.AsyncClient) -> list[dict[str, Any]]:
     now_iso = datetime.now(tz=timezone.utc).isoformat()
     known_hotspots = [
         {"region": "Baltic States", "lat": 56.0, "lon": 20.0, "severity": "severe",
-         "description": "Persistent GPS interference affecting Baltic airspace, well-documented by NATO and EASA", "time": now_iso, "source": "GPSJam-Known"},
+         "description": "Persistent GPS interference affecting Baltic airspace, well-documented by NATO and EASA", "time": now_iso, "source": "GPSJam-Known", "is_fallback": True},
         {"region": "Black Sea", "lat": 43.5, "lon": 34.0, "severity": "severe",
-         "description": "Ongoing GPS spoofing/jamming in Black Sea region, reported by maritime authorities", "time": now_iso, "source": "GPSJam-Known"},
+         "description": "Ongoing GPS spoofing/jamming in Black Sea region, reported by maritime authorities", "time": now_iso, "source": "GPSJam-Known", "is_fallback": True},
         {"region": "Eastern Mediterranean", "lat": 34.0, "lon": 34.5, "severity": "moderate",
-         "description": "GPS interference reported in Eastern Mediterranean airspace", "time": now_iso, "source": "GPSJam-Known"},
+         "description": "GPS interference reported in Eastern Mediterranean airspace", "time": now_iso, "source": "GPSJam-Known", "is_fallback": True},
         {"region": "Middle East", "lat": 33.0, "lon": 44.0, "severity": "moderate",
-         "description": "Regional GPS interference from active conflict zones", "time": now_iso, "source": "GPSJam-Known"},
+         "description": "Regional GPS interference from active conflict zones", "time": now_iso, "source": "GPSJam-Known", "is_fallback": True},
         {"region": "Ukraine", "lat": 48.4, "lon": 31.2, "severity": "severe",
-         "description": "Widespread GPS jamming in Ukraine conflict zone", "time": now_iso, "source": "GPSJam-Known"},
+         "description": "Widespread GPS jamming in Ukraine conflict zone", "time": now_iso, "source": "GPSJam-Known", "is_fallback": True},
         {"region": "Arctic", "lat": 75.0, "lon": 20.0, "severity": "moderate",
-         "description": "GPS interference reported in Arctic region", "time": now_iso, "source": "GPSJam-Known"},
+         "description": "GPS interference reported in Arctic region", "time": now_iso, "source": "GPSJam-Known", "is_fallback": True},
         {"region": "Kaliningrad", "lat": 54.7, "lon": 20.5, "severity": "severe",
-         "description": "Persistent GPS jamming emanating from Kaliningrad region", "time": now_iso, "source": "GPSJam-Known"},
+         "description": "Persistent GPS jamming emanating from Kaliningrad region", "time": now_iso, "source": "GPSJam-Known", "is_fallback": True},
         {"region": "Finland-Russia Border", "lat": 64.0, "lon": 26.0, "severity": "moderate",
-         "description": "GPS interference along Finland-Russia border, reported by Finnish Traficom", "time": now_iso, "source": "GPSJam-Known"},
+         "description": "GPS interference along Finland-Russia border, reported by Finnish Traficom", "time": now_iso, "source": "GPSJam-Known", "is_fallback": True},
         {"region": "Poland-Belarus Border", "lat": 52.0, "lon": 19.0, "severity": "moderate",
-         "description": "GPS jamming reported along Poland-Belarus border area", "time": now_iso, "source": "GPSJam-Known"},
+         "description": "GPS jamming reported along Poland-Belarus border area", "time": now_iso, "source": "GPSJam-Known", "is_fallback": True},
     ]
     return known_hotspots
 

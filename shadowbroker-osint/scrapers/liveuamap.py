@@ -162,14 +162,14 @@ async def fetch_liveuamap(client: httpx.AsyncClient) -> list[dict[str, Any]]:
     logger.warning("LiveUAMap data unavailable from live sources, using known conflict events")
     now_iso = datetime.now(tz=timezone.utc).isoformat()
     known_events = [
-        {"title": "Ongoing conflict in Eastern Ukraine", "description": "Armed clashes continue along the frontlines in Donetsk and Luhansk regions", "lat": 48.0, "lon": 37.5, "eventType": "conflict", "time": now_iso, "source": "LiveUAMap-Known"},
-        {"title": "Military activity in Black Sea region", "description": "Naval movements and military exercises reported in the Black Sea", "lat": 44.0, "lon": 33.0, "eventType": "military", "time": now_iso, "source": "LiveUAMap-Known"},
-        {"title": "Airstrikes reported in Syria", "description": "Multiple airstrikes reported in northwestern Syria", "lat": 35.5, "lon": 37.0, "eventType": "conflict", "time": now_iso, "source": "LiveUAMap-Known"},
-        {"title": "Military deployment in Middle East", "description": "Reported military reinforcements in the region", "lat": 33.0, "lon": 44.0, "eventType": "military", "time": now_iso, "source": "LiveUAMap-Known"},
-        {"title": "Artillery fire along conflict line", "description": "Shelling reported near the contact line", "lat": 47.5, "lon": 36.0, "eventType": "conflict", "time": now_iso, "source": "LiveUAMap-Known"},
-        {"title": "Humanitarian corridor activity", "description": "Civilian evacuation efforts reported in conflict zone", "lat": 48.5, "lon": 37.0, "eventType": "humanitarian", "time": now_iso, "source": "LiveUAMap-Known"},
-        {"title": "Infrastructure damage reported", "description": "Power and water infrastructure affected by military operations", "lat": 47.8, "lon": 35.2, "eventType": "infrastructure", "time": now_iso, "source": "LiveUAMap-Known"},
-        {"title": "Drone operations reported", "description": "UAV activity detected in multiple conflict areas", "lat": 49.0, "lon": 36.5, "eventType": "military", "time": now_iso, "source": "LiveUAMap-Known"},
+        {"title": "Ongoing conflict in Eastern Ukraine", "description": "Armed clashes continue along the frontlines in Donetsk and Luhansk regions", "lat": 48.0, "lon": 37.5, "eventType": "conflict", "time": now_iso, "source": "LiveUAMap-Known", "is_fallback": True},
+        {"title": "Military activity in Black Sea region", "description": "Naval movements and military exercises reported in the Black Sea", "lat": 44.0, "lon": 33.0, "eventType": "military", "time": now_iso, "source": "LiveUAMap-Known", "is_fallback": True},
+        {"title": "Airstrikes reported in Syria", "description": "Multiple airstrikes reported in northwestern Syria", "lat": 35.5, "lon": 37.0, "eventType": "conflict", "time": now_iso, "source": "LiveUAMap-Known", "is_fallback": True},
+        {"title": "Military deployment in Middle East", "description": "Reported military reinforcements in the region", "lat": 33.0, "lon": 44.0, "eventType": "military", "time": now_iso, "source": "LiveUAMap-Known", "is_fallback": True},
+        {"title": "Artillery fire along conflict line", "description": "Shelling reported near the contact line", "lat": 47.5, "lon": 36.0, "eventType": "conflict", "time": now_iso, "source": "LiveUAMap-Known", "is_fallback": True},
+        {"title": "Humanitarian corridor activity", "description": "Civilian evacuation efforts reported in conflict zone", "lat": 48.5, "lon": 37.0, "eventType": "humanitarian", "time": now_iso, "source": "LiveUAMap-Known", "is_fallback": True},
+        {"title": "Infrastructure damage reported", "description": "Power and water infrastructure affected by military operations", "lat": 47.8, "lon": 35.2, "eventType": "infrastructure", "time": now_iso, "source": "LiveUAMap-Known", "is_fallback": True},
+        {"title": "Drone operations reported", "description": "UAV activity detected in multiple conflict areas", "lat": 49.0, "lon": 36.5, "eventType": "military", "time": now_iso, "source": "LiveUAMap-Known", "is_fallback": True},
     ]
     return known_events
 

@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
 import { generateReport } from '@/lib/intelligence/report-generator';
+import { withAuth } from '@/lib/intelligence/auth';
+import { fetchService } from '@/lib/intelligence/service-client';
 
-export async function POST(request: Request) {
+async function _POST(request: Request) {
   try {
     const body = await request.json();
     const reportId: string | undefined = body.reportId;
@@ -9,6 +11,19 @@ export async function POST(request: Request) {
     if (!reportId) {
       return NextResponse.json({ error: 'reportId required' }, { status: 400 });
     }
+
+    // Try Go backend first
+    const goResult = await fetchService<Record<string, unknown>>('goBackend', '/reports/generate', {
+      method: 'POST',
+      body: JSON.stringify({ type: body.type || 'full_intelligence' }),
+    });
+
+    if (!goResult.error && goResult.data) {
+      return NextResponse.json(goResult.data);
+    }
+
+    // Fallback to local Next.js report generation
+    console.warn('[api/reports/generate] Go backend unavailable, using local fallback:', goResult.error);
 
     // Run generation and wait for completion
     await generateReport(reportId);
@@ -40,3 +55,5 @@ export async function POST(request: Request) {
     );
   }
 }
+
+export const POST = withAuth(_POST);

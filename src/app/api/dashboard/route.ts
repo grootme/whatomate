@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 import { fetchService } from '@/lib/intelligence/service-client';
 import { db } from '@/lib/db';
+import { withAuth } from '@/lib/intelligence/auth';
 
-export async function GET() {
+async function _GET() {
   // ===== Try Go backend first =====
   const goResult = await fetchService<Record<string, unknown>>('goBackend', '/dashboard');
   if (!goResult.error && goResult.data) {
@@ -170,6 +171,53 @@ export async function GET() {
       threatScore >= 6 ? 'high' :
       threatScore >= 3 ? 'medium' : 'low';
 
+    // ===== Maritime / OSINT Data =====
+    let maritime: {
+      totalVessels: number;
+      militaryVessels: number;
+      zoneCounts: Record<string, number>;
+      threatAdvisories: string[];
+    } | null = null;
+
+    try {
+      const osintResult = await fetchService<{
+        ships?: Array<Record<string, unknown>>;
+        threat_level?: string;
+      }>('osint', '/api/live-data');
+
+      if (!osintResult.error && osintResult.data?.ships) {
+        const ships = osintResult.data.ships;
+        const militaryVessels = ships.filter(
+          (s) => typeof s.type === 'string' && ['warship', 'naval', 'military'].includes(s.type.toLowerCase())
+        ).length;
+
+        // Compute zone-based vessel counts (group by 10-degree lat bands)
+        const zoneCounts: Record<string, number> = {};
+        const advisories: string[] = [];
+        for (const ship of ships) {
+          const lat = typeof ship.lat === 'number' ? ship.lat : 0;
+          const zoneBand = `${Math.floor(lat / 10) * 10}°${lat >= 0 ? 'N' : 'S'}`;
+          zoneCounts[zoneBand] = (zoneCounts[zoneBand] || 0) + 1;
+        }
+
+        if (militaryVessels > 0) {
+          advisories.push(`${militaryVessels} military/naval vessel(s) detected in monitored zones`);
+        }
+        if (osintResult.data.threat_level === 'high' || osintResult.data.threat_level === 'critical') {
+          advisories.push(`OSINT threat level elevated: ${osintResult.data.threat_level}`);
+        }
+
+        maritime = {
+          totalVessels: ships.length,
+          militaryVessels,
+          zoneCounts,
+          threatAdvisories: advisories,
+        };
+      }
+    } catch {
+      // OSINT service unavailable — maritime section stays null
+    }
+
     return NextResponse.json({
       stats: {
         totalEntities,
@@ -186,28 +234,15 @@ export async function GET() {
       recentActivity,
       threatLevel,
       threatScore,
+      maritime,
     });
   } catch (error) {
     console.error('Dashboard API error:', error);
     return NextResponse.json(
-      {
-        stats: {
-          totalEntities: 0,
-          activeAlerts: 0,
-          totalMessages: 0,
-          activePatterns: 0,
-          entityGrowth: 0,
-          alertGrowth: 0,
-          messageGrowth: 0,
-          patternGrowth: 0,
-        },
-        weeklyAnalytics: [],
-        monthlyAnalytics: [],
-        recentActivity: [],
-        threatLevel: 'low' as const,
-        threatScore: 0,
-      },
+      { error: 'Internal server error fetching dashboard data' },
       { status: 500 }
     );
   }
 }
+
+export const GET = withAuth(_GET);

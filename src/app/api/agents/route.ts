@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { fetchService } from '@/lib/intelligence/service-client';
 import { db } from '@/lib/db';
+import { withAuth } from '@/lib/intelligence/auth';
 
 // ===== Agent Definition (static metadata) =====
 interface AgentDefinition {
@@ -195,149 +196,156 @@ function computeUptime(startedAt: Date | null | undefined): string {
   return `${days}d ${hours}h`;
 }
 
-export async function GET() {
-  // ===== Try Go backend first =====
-  const goResult = await fetchService<Record<string, unknown>>('goBackend', '/agents');
-  if (!goResult.error && goResult.data) {
-    return NextResponse.json(goResult.data);
-  }
-
-  // ===== Fallback to local Next.js intelligence engine =====
-  console.warn('[api/agents] Go backend unavailable, using local fallback:', goResult.error);
-
-  // Check all microservices in parallel
-  const serviceChecks = await Promise.all([
-    fetchService<{ connected: boolean; groups?: number }>('whatsapp', '/status'),
-    fetchService<{ status: string; groups_count?: number }>('telegram', '/status'),
-    fetchService<{ status: string }>('osint', '/report'),
-    fetchService<{ status: string }>('cognitive', '/dashboard'),
-    fetchService<{ status: string }>('hermes', '/status'),
-    fetchService<{ status: string }>('shadowbrokerAi', '/status'),
-  ]);
-
-  // Map service check results
-  const serviceResults: Record<string, boolean | null> = {
-    whatsapp: !serviceChecks[0].error,
-    telegram: !serviceChecks[1].error,
-    osint: !serviceChecks[2].error,
-    cognitive: !serviceChecks[3].error,
-    hermes: !serviceChecks[4].error,
-    shadowbrokerAi: !serviceChecks[5].error,
-  };
-
-  // Load all persisted agent states from DB
-  const agentStates = await db.agentState.findMany();
-  const agentMap = new Map(agentStates.map(a => [a.agentId, a]));
-
-  // Build agents from definitions + DB state + service checks
-  const agents = AGENT_DEFINITIONS.map(def => {
-    const dbState = agentMap.get(def.id);
-    let serviceOnline: boolean | null = null;
-
-    // Determine service check result
-    if (def.serviceCheck) {
-      serviceOnline = serviceResults[def.serviceCheck.service] ?? null;
+async function _GET() {
+  try {
+    // ===== Try Go backend first =====
+    const goResult = await fetchService<Record<string, unknown>>('goBackend', '/agents');
+    if (!goResult.error && goResult.data) {
+      return NextResponse.json(goResult.data);
     }
 
-    const health = computeHealthFromDB(dbState, serviceOnline);
-    const status = computeStatusFromDB(dbState, serviceOnline);
-    const uptime = computeUptime(dbState?.startedAt);
+    // ===== Fallback to local Next.js intelligence engine =====
+    console.warn('[api/agents] Go backend unavailable, using local fallback:', goResult.error);
 
-    return {
-      id: def.id,
-      name: def.name,
-      layer: def.layer,
-      layerName: def.layerName,
-      status,
-      health,
-      messagesProcessed: dbState?.messagesProcessed ?? 0,
-      lastHeartbeat: dbState?.lastHeartbeat?.toISOString() ?? '',
-      uptime,
-      description: def.description,
+    // Check all microservices in parallel
+    const serviceChecks = await Promise.all([
+      fetchService<{ connected: boolean; groups?: number }>('whatsapp', '/status'),
+      fetchService<{ status: string; groups_count?: number }>('telegram', '/status'),
+      fetchService<{ status: string }>('osint', '/report'),
+      fetchService<{ status: string }>('cognitive', '/dashboard'),
+      fetchService<{ status: string }>('hermes', '/status'),
+      fetchService<{ status: string }>('shadowbrokerAi', '/status'),
+    ]);
+
+    // Map service check results
+    const serviceResults: Record<string, boolean | null> = {
+      whatsapp: !serviceChecks[0].error,
+      telegram: !serviceChecks[1].error,
+      osint: !serviceChecks[2].error,
+      cognitive: !serviceChecks[3].error,
+      hermes: !serviceChecks[4].error,
+      shadowbrokerAi: !serviceChecks[5].error,
     };
-  });
 
-  // Group agents into layers
-  const layers = [
-    {
-      id: 1,
-      name: 'Ingesta',
-      description: 'Captura y recolección de datos de múltiples fuentes en tiempo real',
-      color: '#10B981',
-      icon: 'Download',
-      agents: agents.filter(a => a.layer === 1),
-    },
-    {
-      id: 2,
-      name: 'Análisis',
-      description: 'Procesamiento semántico, detección de patrones y correlación multi-plataforma',
-      color: '#F59E0B',
-      icon: 'Brain',
-      agents: agents.filter(a => a.layer === 2),
-    },
-    {
-      id: 3,
-      name: 'Monitoreo',
-      description: 'Supervisión de umbrales, detección de anomalías y generación de alertas',
-      color: '#EF4444',
-      icon: 'Shield',
-      agents: agents.filter(a => a.layer === 3),
-    },
-    {
-      id: 4,
-      name: 'Reportes',
-      description: 'Generación automatizada de informes y construcción de dashboards',
-      color: '#8B5CF6',
-      icon: 'FileOutput',
-      agents: agents.filter(a => a.layer === 4),
-    },
-  ];
+    // Load all persisted agent states from DB
+    const agentStates = await db.agentState.findMany();
+    const agentMap = new Map(agentStates.map(a => [a.agentId, a]));
 
-  // Compute ecosystem stats from real DB data
-  const [whatsappChannels, telegramChannels, osintChannels] = await Promise.all([
-    db.rawMessage.findMany({
-      where: { source: 'whatsapp' },
-      select: { channelId: true },
-      distinct: ['channelId'],
-    }),
-    db.rawMessage.findMany({
-      where: { source: 'telegram' },
-      select: { channelId: true },
-      distinct: ['channelId'],
-    }),
-    db.rawMessage.findMany({
-      where: { source: 'osint' },
-      select: { channelId: true },
-      distinct: ['channelId'],
-    }),
-  ]);
+    // Build agents from definitions + DB state + service checks
+    const agents = AGENT_DEFINITIONS.map(def => {
+      const dbState = agentMap.get(def.id);
+      let serviceOnline: boolean | null = null;
 
-  const whatsappGroups = whatsappChannels.filter(c => c.channelId != null).length;
-  const telegramChannelsCount = telegramChannels.filter(c => c.channelId != null).length;
-  const osintSources = osintChannels.filter(c => c.channelId != null).length;
+      // Determine service check result
+      if (def.serviceCheck) {
+        serviceOnline = serviceResults[def.serviceCheck.service] ?? null;
+      }
 
-  // Also try to get richer stats from live service responses
-  const whatsappGroupCount = (serviceChecks[0].data as { groups?: number } | null)?.groups;
-  const telegramGroupCount = (serviceChecks[1].data as { groups_count?: number } | null)?.groups_count;
+      const health = computeHealthFromDB(dbState, serviceOnline);
+      const status = computeStatusFromDB(dbState, serviceOnline);
+      const uptime = computeUptime(dbState?.startedAt);
 
-  // Compute telegramMembers from live service response (real member count)
-  // Fall back to DB: estimate based on distinct channels × avg member count from last check
-  const telegramMemberCount = (serviceChecks[1].data as { total_members?: number; members_count?: number } | null)?.total_members
-    ?? (serviceChecks[1].data as { total_members?: number; members_count?: number } | null)?.members_count;
+      return {
+        id: def.id,
+        name: def.name,
+        layer: def.layer,
+        layerName: def.layerName,
+        status,
+        health,
+        messagesProcessed: dbState?.messagesProcessed ?? 0,
+        lastHeartbeat: dbState?.lastHeartbeat?.toISOString() ?? '',
+        uptime,
+        description: def.description,
+      };
+    });
 
-  const ecosystem = {
-    whatsappGroups: whatsappGroupCount ?? whatsappGroups,
-    telegramChannels: telegramGroupCount ?? telegramChannelsCount,
-    osintSources: osintSources,
-    totalGroups: (whatsappGroupCount ?? whatsappGroups) + (telegramGroupCount ?? telegramChannelsCount) + osintSources,
-    telegramMembers: telegramMemberCount != null
-      ? telegramMemberCount > 1000000
-        ? `${(telegramMemberCount / 1000000).toFixed(1)}M+`
-        : telegramMemberCount > 1000
-          ? `${(telegramMemberCount / 1000).toFixed(1)}K+`
-          : String(telegramMemberCount)
-      : 'N/A',
-  };
+    // Group agents into layers
+    const layers = [
+      {
+        id: 1,
+        name: 'Ingesta',
+        description: 'Captura y recolección de datos de múltiples fuentes en tiempo real',
+        color: '#10B981',
+        icon: 'Download',
+        agents: agents.filter(a => a.layer === 1),
+      },
+      {
+        id: 2,
+        name: 'Análisis',
+        description: 'Procesamiento semántico, detección de patrones y correlación multi-plataforma',
+        color: '#F59E0B',
+        icon: 'Brain',
+        agents: agents.filter(a => a.layer === 2),
+      },
+      {
+        id: 3,
+        name: 'Monitoreo',
+        description: 'Supervisión de umbrales, detección de anomalías y generación de alertas',
+        color: '#EF4444',
+        icon: 'Shield',
+        agents: agents.filter(a => a.layer === 3),
+      },
+      {
+        id: 4,
+        name: 'Reportes',
+        description: 'Generación automatizada de informes y construcción de dashboards',
+        color: '#8B5CF6',
+        icon: 'FileOutput',
+        agents: agents.filter(a => a.layer === 4),
+      },
+    ];
 
-  return NextResponse.json({ layers, ecosystem });
+    // Compute ecosystem stats from real DB data
+    const [whatsappChannels, telegramChannels, osintChannels] = await Promise.all([
+      db.rawMessage.findMany({
+        where: { source: 'whatsapp' },
+        select: { channelId: true },
+        distinct: ['channelId'],
+      }),
+      db.rawMessage.findMany({
+        where: { source: 'telegram' },
+        select: { channelId: true },
+        distinct: ['channelId'],
+      }),
+      db.rawMessage.findMany({
+        where: { source: 'osint' },
+        select: { channelId: true },
+        distinct: ['channelId'],
+      }),
+    ]);
+
+    const whatsappGroups = whatsappChannels.filter(c => c.channelId != null).length;
+    const telegramChannelsCount = telegramChannels.filter(c => c.channelId != null).length;
+    const osintSources = osintChannels.filter(c => c.channelId != null).length;
+
+    // Also try to get richer stats from live service responses
+    const whatsappGroupCount = (serviceChecks[0].data as { groups?: number } | null)?.groups;
+    const telegramGroupCount = (serviceChecks[1].data as { groups_count?: number } | null)?.groups_count;
+
+    // Compute telegramMembers from live service response (real member count)
+    // Fall back to DB: estimate based on distinct channels × avg member count from last check
+    const telegramMemberCount = (serviceChecks[1].data as { total_members?: number; members_count?: number } | null)?.total_members
+      ?? (serviceChecks[1].data as { total_members?: number; members_count?: number } | null)?.members_count;
+
+    const ecosystem = {
+      whatsappGroups: whatsappGroupCount ?? whatsappGroups,
+      telegramChannels: telegramGroupCount ?? telegramChannelsCount,
+      osintSources: osintSources,
+      totalGroups: (whatsappGroupCount ?? whatsappGroups) + (telegramGroupCount ?? telegramChannelsCount) + osintSources,
+      telegramMembers: telegramMemberCount != null
+        ? telegramMemberCount > 1000000
+          ? `${(telegramMemberCount / 1000000).toFixed(1)}M+`
+          : telegramMemberCount > 1000
+            ? `${(telegramMemberCount / 1000).toFixed(1)}K+`
+            : String(telegramMemberCount)
+        : 'N/A',
+    };
+
+    return NextResponse.json({ layers, ecosystem });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Internal server error';
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }
+
+export const GET = withAuth(_GET);

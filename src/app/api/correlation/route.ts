@@ -1,10 +1,22 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { runFullCorrelation } from '@/lib/intelligence/correlation-engine';
+import { fetchService } from '@/lib/intelligence/service-client';
+import { withAuth } from '@/lib/intelligence/auth';
 
 // ===== POST: Run full correlation analysis =====
-export async function POST() {
+async function _POST() {
   try {
+    // ===== Try Go backend first =====
+    const goResult = await fetchService<Record<string, unknown>>('goBackend', '/correlation', {
+      method: 'POST',
+    });
+    if (!goResult.error && goResult.data) {
+      return NextResponse.json(goResult.data);
+    }
+
+    console.warn('[api/correlation] Go backend POST unavailable, using local fallback:', goResult.error);
+
     const result = await runFullCorrelation();
 
     return NextResponse.json({
@@ -31,7 +43,7 @@ export async function POST() {
 }
 
 // ===== GET: Return correlation stats from DB =====
-export async function GET() {
+async function _GET() {
   try {
     // EntityRelation count
     const totalRelations = await db.entityRelation.count();
@@ -165,3 +177,6 @@ export async function GET() {
     );
   }
 }
+
+export const GET = withAuth(_GET);
+export const POST = withAuth(_POST);

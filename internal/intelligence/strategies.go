@@ -84,6 +84,7 @@ func (sr *StrategyRegistry) EvaluateAll(ctx StrategyContext) []*StrategyResult {
                         continue
                 }
                 if result != nil {
+                        result.StrategyID = s.ID()
                         results = append(results, result)
                 }
         }
@@ -951,11 +952,34 @@ func (ps *PredictiveStrategy) ID() string   { return "predictive" }
 func (ps *PredictiveStrategy) Name() string { return "Predictive Strategy" }
 
 func (ps *PredictiveStrategy) Evaluate(ctx StrategyContext) (*StrategyResult, error) {
-        // Compute current metrics
+        // Compute current metrics — including OSINT-derived metrics
+        osintEventCount := 0.0
+        threatScore := 0.0
+        if ctx.OSINTData != nil {
+                osintEventCount += float64(len(ctx.OSINTData.Earthquakes))
+                osintEventCount += float64(len(ctx.OSINTData.Fires))
+                osintEventCount += float64(len(ctx.OSINTData.GPSJamming))
+                osintEventCount += float64(len(ctx.OSINTData.UAVs))
+                osintEventCount += float64(len(ctx.OSINTData.LiveUAMap))
+                osintEventCount += float64(len(ctx.OSINTData.SIGINT))
+                osintEventCount += float64(len(ctx.OSINTData.Ships))
+                osintEventCount += float64(len(ctx.OSINTData.GDELT))
+                if ctx.OSINTData.Weather != nil {
+                        osintEventCount += float64(ctx.OSINTData.Weather.ActiveAlerts)
+                }
+                // Compute an aggregate OSINT threat score (0-100)
+                threatScore = osintEventCount * 2.0
+                if threatScore > 100 {
+                        threatScore = 100
+                }
+        }
+
         currentMetrics := map[string]float64{
-                "message_volume": float64(len(ctx.Messages)),
-                "entity_count":   float64(len(ctx.Entities)),
-                "pattern_count":  float64(len(ctx.Patterns)),
+                "message_volume":    float64(len(ctx.Messages)),
+                "entity_count":      float64(len(ctx.Entities)),
+                "pattern_count":     float64(len(ctx.Patterns)),
+                "threat_score":      threatScore,
+                "osint_event_count": osintEventCount,
         }
 
         // Update history

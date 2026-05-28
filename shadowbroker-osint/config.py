@@ -1,6 +1,9 @@
 """Shadowbroker OSINT Backend Configuration"""
 
+import logging
 import os
+
+_module_logger = logging.getLogger("shadowbroker.config")
 
 PORT = int(os.environ.get("OSINT_PORT", 8000))
 CACHE_DURATION = 300  # 5 minutes cache for scraped data
@@ -12,7 +15,9 @@ RATE_LIMIT_WINDOW = 60  # seconds
 
 # API endpoints
 USGS_EARTHQUAKE_URL = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/4.5_day.geojson"
-NASA_FIRMS_MAP_KEY = os.environ.get("NASA_FIRMS_MAP_KEY", "48f3d852d3a84cf043ad1a08c07c2146")
+NASA_FIRMS_MAP_KEY = os.environ.get("NASA_FIRMS_MAP_KEY", "")
+if not NASA_FIRMS_MAP_KEY:
+    _module_logger.warning("NASA_FIRMS_MAP_KEY env var not set — FIRMS fire data will be unavailable")
 NASA_FIRMS_URL = f"https://firms.modaps.eosdis.nasa.gov/api/area/csv/{NASA_FIRMS_MAP_KEY}/VIIRS_SNPP_NRT/-180,-90,180,90/1"
 OPENSKY_URL = "https://opensky-network.org/api/states/all"
 GDELT_URL = "https://api.gdeltproject.org/api/v2/doc/doc?query=war%20conflict&mode=artlist&maxrecords=20&format=json"
