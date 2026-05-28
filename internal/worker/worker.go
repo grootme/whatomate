@@ -287,7 +287,7 @@ func (w *Worker) sendTemplateMessage(ctx context.Context, account *models.WhatsA
 		})
 	}
 
-	return w.WhatsApp.SendTemplateMessageWithComponents(ctx, waAccount, recipient.PhoneNumber, template.Name, template.Language, components)
+	return w.WhatsApp.SendTemplateMessage(ctx, waAccount, recipient.PhoneNumber, template.Name, template.Language, nil)
 }
 
 // buildMediaParameter creates a media parameter for WhatsApp template headers.

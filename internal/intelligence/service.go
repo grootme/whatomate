@@ -303,7 +303,7 @@ func (is *IntelligenceService) RunAnalysis(ctx context.Context) ([]AnalysisResul
 // ======================================================================
 
 // EvaluateStrategies runs all strategies against the current intelligence context
-func (is *IntelligenceService) EvaluateStrategies(ctx context.Context) ([]StrategyResult, []Alert, error) {
+func (is *IntelligenceService) EvaluateStrategies(ctx context.Context) ([]*StrategyResult, []Alert, error) {
         // Build strategy context
         entities := is.analysis.GetEntities()
         patterns := is.analysis.GetPatterns()
@@ -793,7 +793,7 @@ func (is *IntelligenceService) GetStrategies() []StrategyHandler {
 }
 
 // GetStrategySignals returns the current signals from all strategies
-func (is *IntelligenceService) GetStrategySignals(ctx context.Context) []StrategyResult {
+func (is *IntelligenceService) GetStrategySignals(ctx context.Context) []*StrategyResult {
         entities := is.analysis.GetEntities()
         patterns := is.analysis.GetPatterns()
 

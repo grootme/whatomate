@@ -37,7 +37,7 @@ func (ce *CorrelationEngine) CorrelateEntities(ctx context.Context, entities []E
 	}
 
 	// Find entities that appear across multiple sources (cross-platform)
-	for name, group := range nameGroups {
+	for _, group := range nameGroups {
 		if len(group) < 2 {
 			continue
 		}

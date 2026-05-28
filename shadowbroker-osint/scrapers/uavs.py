@@ -16,6 +16,8 @@ import httpx
 
 from config import (
     OPENSKY_URL,
+    OPENSKY_USERNAME,
+    OPENSKY_PASSWORD,
     FAA_NOTAM_URL,
     UAV_CALLSIGN_PREFIXES,
     USER_AGENT,
@@ -90,10 +92,16 @@ async def fetch_uavs(client: httpx.AsyncClient) -> list[dict[str, Any]]:
 
     # ── Strategy 1: OpenSky Network — filter for UAV callsigns ──
     try:
+        # Add Basic auth if credentials are available (increases rate limits)
+        auth = None
+        if OPENSKY_USERNAME and OPENSKY_PASSWORD:
+            auth = (OPENSKY_USERNAME, OPENSKY_PASSWORD)
+
         resp = await client.get(
             OPENSKY_URL,
             headers={"User-Agent": USER_AGENT},
             timeout=HTTP_TIMEOUT,
+            auth=auth,
         )
 
         if resp.status_code == 429:
