@@ -55,7 +55,7 @@ const SERVICE_CHECKS: ServiceCheckDefinition[] = [
   { service: 'hermes', path: '/health', description: 'Hermes Communication Hub' },
   { service: 'shadowbrokerAi', path: '/health', description: 'Shadowbroker AI Engine' },
   { service: 'backend', path: '/health', description: 'Backend Core API' },
-  { service: 'goIntel', path: '/api/intel/health', description: 'Go Intelligence Engine' },
+  { service: 'goBackend', path: '/health', description: 'Go Intelligence Engine' },
 ];
 
 // ===== Status Determination =====

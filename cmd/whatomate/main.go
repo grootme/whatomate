@@ -263,6 +263,10 @@ func runServer(args []string) {
         intelService.StartScheduler(intelCtx)
         lo.Info("Intelligence scheduler started")
 
+        // Start background tasks (health aggregator, real-time threat computer, metrics collector)
+        intelService.StartBackgroundTasks(intelCtx)
+        lo.Info("Intelligence background tasks started")
+
         // Start embedded workers
         var workers []*worker.Worker
         var workerCancel context.CancelFunc
@@ -782,6 +786,8 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
         g.GET("/api/intel/metrics", app.GetIntelMetrics)
         g.POST("/api/intel/scheduler/run", app.RunIntelScheduler)
         g.GET("/api/intel/scheduler/status", app.GetIntelSchedulerStatus)
+        g.PUT("/api/intel/thresholds", app.UpdateIntelThreshold)
+        g.POST("/api/intel/adaptive/feedback", app.RecordAdaptiveFeedback)
 
         // Serve embedded frontend (SPA)
         if frontend.IsEmbedded() {

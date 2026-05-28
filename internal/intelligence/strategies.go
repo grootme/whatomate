@@ -238,9 +238,6 @@ func (ts *ThresholdStrategy) computeCurrentValues(ctx StrategyContext) map[strin
 
         // Critical alert count (from monitoring)
         criticalAlerts := 0
-        for _, msg := range ctx.Messages {
-                _ = msg // Messages don't carry alert data directly; check patterns
-        }
         for _, p := range ctx.Patterns {
                 if p.Status == "active" && p.Severity == "CRÍTICA" {
                         criticalAlerts += p.Occurrences
@@ -998,14 +995,13 @@ func (ps *PredictiveStrategy) Evaluate(ctx StrategyContext) (*StrategyResult, er
         alertPredicted := false
         predictedMetric := ""
 
+        ps.mu.RLock()
         for metric, values := range ps.history {
                 if len(values) < 3 {
                         continue // Need at least 3 data points
                 }
 
-                ps.mu.RLock()
                 predicted, confidence := ps.holtWintersForecast(values, 0.3, 0.1, 0.1, 7) // 7 periods ahead
-                ps.mu.RUnlock()
 
                 pred := Prediction{
                         ID:          uuid.New().String(),
@@ -1039,6 +1035,7 @@ func (ps *PredictiveStrategy) Evaluate(ctx StrategyContext) (*StrategyResult, er
                         predictedMetric = metric
                 }
         }
+        ps.mu.RUnlock()
 
         if alertPredicted {
                 return &StrategyResult{

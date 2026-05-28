@@ -831,3 +831,61 @@ func (a *App) GetIntelMetrics(r *fastglue.Request) error {
                 "streamStats":    dashboard.StreamStats,
         })
 }
+
+// UpdateIntelThreshold updates a threshold configuration
+func (a *App) UpdateIntelThreshold(r *fastglue.Request) error {
+        if a.IntelService == nil {
+                return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable, "Intelligence service not initialized", nil, "")
+        }
+
+        var req struct {
+                ID    string  `json:"id"`
+                Value float64 `json:"value"`
+        }
+
+        if err := a.decodeRequest(r, &req); err != nil {
+                return err
+        }
+
+        if req.ID == "" {
+                return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Threshold ID is required", nil, "")
+        }
+
+        a.IntelService.UpdateThreshold(req.ID, req.Value)
+
+        return r.SendEnvelope(map[string]interface{}{
+                "status":       "updated",
+                "thresholdId":  req.ID,
+                "newValue":     req.Value,
+        })
+}
+
+// RecordAdaptiveFeedback records user feedback for the adaptive strategy
+func (a *App) RecordAdaptiveFeedback(r *fastglue.Request) error {
+        if a.IntelService == nil {
+                return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable, "Intelligence service not initialized", nil, "")
+        }
+
+        var req struct {
+                AlertID       string  `json:"alertId"`
+                IsFalsePositive bool  `json:"isFalsePositive"`
+                Feedback      string  `json:"feedback"`
+        }
+
+        if err := a.decodeRequest(r, &req); err != nil {
+                return err
+        }
+
+        if req.AlertID == "" {
+                return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "Alert ID is required", nil, "")
+        }
+
+        ctx := context.Background()
+        a.IntelService.RecordAdaptiveFeedback(ctx, req.AlertID, req.IsFalsePositive, req.Feedback)
+
+        return r.SendEnvelope(map[string]interface{}{
+                "status":             "recorded",
+                "alertId":            req.AlertID,
+                "isFalsePositive":    req.IsFalsePositive,
+        })
+}

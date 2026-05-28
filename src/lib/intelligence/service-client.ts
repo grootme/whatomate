@@ -8,10 +8,18 @@ export interface ServiceResponse<T> {
 }
 
 /**
+ * Whether to use direct URLs (bypassing Caddy gateway) for all services.
+ * In development mode or when Caddy is not running, we construct full URLs
+ * for every service instead of relying on the XTransformPort gateway pattern.
+ */
+const USE_DIRECT_URLS =
+  process.env.CADDY_GATEWAY === 'true' ? false : true;
+
+/**
  * Build the request URL for a given service endpoint.
- * - For "direct" endpoints (e.g. goBackend), constructs a full URL:
- *     ${protocol}://${host}:${port}${basePath}${path}
- * - For gateway-routed endpoints, uses the Caddy relative-path pattern:
+ * - For "direct" endpoints (e.g. goBackend) OR when USE_DIRECT_URLS is true,
+ *   constructs a full URL: ${protocol}://${host}:${port}${basePath}${path}
+ * - For gateway-routed endpoints (Caddy running), uses relative-path pattern:
  *     ${basePath}${path}?XTransformPort=${port}
  */
 function buildServiceUrl(
@@ -20,7 +28,8 @@ function buildServiceUrl(
 ): string {
   const endpoint = SERVICE_ENDPOINTS[service];
 
-  if ('direct' in endpoint && endpoint.direct) {
+  // Use direct URLs when: endpoint is marked direct OR we're bypassing Caddy
+  if (('direct' in endpoint && endpoint.direct) || USE_DIRECT_URLS) {
     const protocol = ('protocol' in endpoint ? endpoint.protocol : 'http') as string;
     return `${protocol}://${endpoint.host}:${endpoint.port}${endpoint.basePath}${path}`;
   }
