@@ -8,16 +8,37 @@ export interface ServiceResponse<T> {
 }
 
 /**
- * Typed client for connecting to microservices through the Caddy gateway.
- * Uses relative paths with ?XTransformPort=PORT as required by the gateway.
+ * Build the request URL for a given service endpoint.
+ * - For "direct" endpoints (e.g. goBackend), constructs a full URL:
+ *     ${protocol}://${host}:${port}${basePath}${path}
+ * - For gateway-routed endpoints, uses the Caddy relative-path pattern:
+ *     ${basePath}${path}?XTransformPort=${port}
+ */
+function buildServiceUrl(
+  service: keyof typeof SERVICE_ENDPOINTS,
+  path: string,
+): string {
+  const endpoint = SERVICE_ENDPOINTS[service];
+
+  if ('direct' in endpoint && endpoint.direct) {
+    const protocol = ('protocol' in endpoint ? endpoint.protocol : 'http') as string;
+    return `${protocol}://${endpoint.host}:${endpoint.port}${endpoint.basePath}${path}`;
+  }
+
+  return `${endpoint.basePath}${path}?XTransformPort=${endpoint.port}`;
+}
+
+/**
+ * Typed client for connecting to microservices.
+ * For gateway-routed services, uses relative paths with ?XTransformPort=PORT.
+ * For direct services (goBackend), constructs full URLs bypassing the gateway.
  */
 export async function fetchService<T>(
   service: keyof typeof SERVICE_ENDPOINTS,
   path: string,
   options?: RequestInit
 ): Promise<ServiceResponse<T>> {
-  const endpoint = SERVICE_ENDPOINTS[service];
-  const url = `${endpoint.basePath}${path}?XTransformPort=${endpoint.port}`;
+  const url = buildServiceUrl(service, path);
   const start = Date.now();
 
   try {

@@ -1,10 +1,20 @@
 import { NextResponse } from 'next/server';
 import { withAuth } from '@/lib/intelligence/auth';
+import { fetchService } from '@/lib/intelligence/service-client';
 import { db } from '@/lib/db';
 import { runAnomalyDetection } from '@/lib/intelligence/anomaly-detector';
 
 // ===== GET: Return recent anomaly alerts and metrics =====
 async function _GET() {
+  // ===== Try Go backend first =====
+  const goResult = await fetchService<Record<string, unknown>>('goBackend', '/anomalies');
+  if (!goResult.error && goResult.data) {
+    return NextResponse.json(goResult.data);
+  }
+
+  // ===== Fallback to local Next.js intelligence engine =====
+  console.warn('[api/anomalies] Go backend unavailable, using local fallback:', goResult.error);
+
   try {
     const now = new Date();
     const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
@@ -98,6 +108,20 @@ async function _GET() {
 
 // ===== POST: Trigger anomaly detection and return results =====
 async function _POST() {
+  // ===== Try Go backend first =====
+  try {
+    const goResult = await fetchService<Record<string, unknown>>('goBackend', '/anomalies', {
+      method: 'POST',
+    });
+    if (!goResult.error && goResult.data) {
+      return NextResponse.json(goResult.data);
+    }
+    console.warn('[api/anomalies] Go backend POST unavailable, using local fallback:', goResult.error);
+  } catch {
+    console.warn('[api/anomalies] Go backend POST failed, using local fallback');
+  }
+
+  // ===== Fallback to local =====
   try {
     const result = await runAnomalyDetection();
 

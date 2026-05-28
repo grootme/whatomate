@@ -8,7 +8,8 @@ import { ToolDefinition } from '../registry.js'
 const TELETHON_URL = process.env.TELETHON_URL || 'http://localhost:8700'
 const SHADOWBROKER_URL = process.env.SHADOWBROKER_URL || 'http://localhost:8660'
 const COGNITIVE_URL = process.env.COGNITIVE_URL || 'http://localhost:8645'
-const DEERFLOW_URL = process.env.DEERFLOW_URL || 'http://localhost:8000'
+const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8080'
+const OSINT_URL = process.env.OSINT_URL || 'http://localhost:8000'
 const WHATSAPP_BRIDGE_URL = process.env.WHATSAPP_BRIDGE_URL || 'http://localhost:3001'
 
 async function fetchJSON(url: string, method: string = 'GET', body: any = null, timeout: number = 5000): Promise<any> {
@@ -37,7 +38,7 @@ async function fetchJSON(url: string, method: string = 'GET', body: any = null, 
 export const systemTools: ToolDefinition[] = [
   {
     name: 'ecosystem_status',
-    description: 'Obtiene el estado de todos los servicios del ecosistema Whatomate: Telethon, Shadowbroker, Cognitive API, WhatsApp Bridge, DeerFlow. Útil para diagnosticar problemas o verificar que todo está funcionando.',
+    description: 'Obtiene el estado de todos los servicios del ecosistema Whatomate: Telethon, Shadowbroker, Cognitive API, WhatsApp Bridge, Go Backend, Go Intelligence Engine, OSINT Direct. Útil para diagnosticar problemas o verificar que todo está funcionando.',
     category: 'system',
     parameters: {
       type: 'object',
@@ -49,7 +50,9 @@ export const systemTools: ToolDefinition[] = [
         { name: 'Shadowbroker', url: `${SHADOWBROKER_URL}/health` },
         { name: 'Cognitive API', url: `${COGNITIVE_URL}/health` },
         { name: 'WhatsApp Bridge', url: `${WHATSAPP_BRIDGE_URL}/health` },
-        { name: 'DeerFlow', url: `${DEERFLOW_URL}/health` },
+        { name: 'Go Backend', url: `${BACKEND_URL}/health` },
+        { name: 'Go Intelligence Engine', url: `${BACKEND_URL}/api/intel/dashboard` },
+        { name: 'OSINT Direct', url: `${OSINT_URL}/health` },
       ]
 
       const results: Record<string, any> = {}

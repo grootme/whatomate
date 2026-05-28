@@ -1,12 +1,21 @@
 import { NextResponse } from 'next/server';
 import { withAuth } from '@/lib/intelligence/auth';
+import { fetchService } from '@/lib/intelligence/service-client';
 import { db } from '@/lib/db';
 import { persistEvent } from '@/lib/intelligence/event-persist';
-import { fetchService } from '@/lib/intelligence/service-client';
 import { strategyRegistry } from '@/lib/intelligence/strategies';
 import { buildStrategyContext } from '@/lib/intelligence/context-builder';
 
 async function _GET() {
+  // ===== Try Go backend first =====
+  const goResult = await fetchService<Record<string, unknown>[]>('goBackend', '/alerts');
+  if (!goResult.error && goResult.data) {
+    return NextResponse.json(goResult.data);
+  }
+
+  // ===== Fallback to local Next.js intelligence engine =====
+  console.warn('[api/alerts] Go backend unavailable, using local fallback:', goResult.error);
+
   // Get alerts from database
   const dbAlerts = await db.alert.findMany({
     orderBy: { timestamp: 'desc' },

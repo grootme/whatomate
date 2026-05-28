@@ -2,6 +2,15 @@ import { NextResponse } from 'next/server';
 import { fetchService } from '@/lib/intelligence/service-client';
 
 export async function GET() {
+  // ===== Try Go backend first =====
+  const goResult = await fetchService<Record<string, unknown>>('goBackend', '/threat-feed');
+  if (!goResult.error && goResult.data) {
+    return NextResponse.json(goResult.data);
+  }
+
+  // ===== Fallback to local Next.js intelligence engine =====
+  console.warn('[api/osint] Go backend unavailable, using local fallback:', goResult.error);
+
   // Fetch real OSINT data from all sources
   const [report, threat, events] = await Promise.all([
     fetchService<Record<string, unknown>>('osint', '/report'),

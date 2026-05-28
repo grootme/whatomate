@@ -48,13 +48,14 @@ interface ServiceCheckDefinition {
 }
 
 const SERVICE_CHECKS: ServiceCheckDefinition[] = [
-  { service: 'whatsapp', path: '/status', description: 'WhatsApp Baileys Bridge' },
-  { service: 'telegram', path: '/status', description: 'Telegram Telethon Bridge' },
-  { service: 'osint', path: '/report', description: 'OSINT Shadowbroker Engine' },
-  { service: 'cognitive', path: '/dashboard', description: 'Cognitive Analysis Engine' },
-  { service: 'hermes', path: '/status', description: 'Hermes Communication Hub' },
-  { service: 'shadowbrokerAi', path: '/status', description: 'Shadowbroker AI Engine' },
+  { service: 'whatsapp', path: '/health', description: 'WhatsApp Baileys Bridge' },
+  { service: 'telegram', path: '/health', description: 'Telegram Telethon Bridge' },
+  { service: 'osint', path: '/api/health', description: 'OSINT Shadowbroker Engine' },
+  { service: 'cognitive', path: '/health', description: 'Cognitive Analysis Engine' },
+  { service: 'hermes', path: '/health', description: 'Hermes Communication Hub' },
+  { service: 'shadowbrokerAi', path: '/health', description: 'Shadowbroker AI Engine' },
   { service: 'backend', path: '/health', description: 'Backend Core API' },
+  { service: 'goIntel', path: '/api/intel/health', description: 'Go Intelligence Engine' },
 ];
 
 // ===== Status Determination =====

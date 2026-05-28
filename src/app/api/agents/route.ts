@@ -196,6 +196,15 @@ function computeUptime(startedAt: Date | null | undefined): string {
 }
 
 export async function GET() {
+  // ===== Try Go backend first =====
+  const goResult = await fetchService<Record<string, unknown>>('goBackend', '/agents');
+  if (!goResult.error && goResult.data) {
+    return NextResponse.json(goResult.data);
+  }
+
+  // ===== Fallback to local Next.js intelligence engine =====
+  console.warn('[api/agents] Go backend unavailable, using local fallback:', goResult.error);
+
   // Check all microservices in parallel
   const serviceChecks = await Promise.all([
     fetchService<{ connected: boolean; groups?: number }>('whatsapp', '/status'),

@@ -5,18 +5,22 @@ Consumed by the Shadowbroker AI Bridge (port 8660).
 """
 
 import asyncio
+import json
 import logging
 import time
 from datetime import datetime, timezone
 from typing import Any
 
 import httpx
+import redis.asyncio as aioredis
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import (
     CACHE_DURATION,
     PORT,
+    REDIS_HOST,
+    REDIS_PORT,
     USER_AGENT,
     HTTP_TIMEOUT,
 )
@@ -25,9 +29,13 @@ from scrapers import (
     fetch_fires,
     fetch_flights,
     fetch_gdelt,
+    fetch_gps_jamming,
+    fetch_liveuamap,
     fetch_news,
-    fetch_weather_alerts,
     fetch_ships,
+    fetch_sigint,
+    fetch_uavs,
+    fetch_weather_alerts,
 )
 
 # ── Logging ──────────────────────────────────────────────────────────────────
@@ -51,6 +59,58 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Redis Connection ─────────────────────────────────────────────────────────
+_redis: aioredis.Redis | None = None
+_redis_available: bool = False
+
+
+async def _get_redis() -> aioredis.Redis | None:
+    """Get or create the Redis connection (lazy init)."""
+    global _redis, _redis_available
+    if _redis is not None:
+        return _redis
+    try:
+        _redis = aioredis.Redis(
+            host=REDIS_HOST,
+            port=REDIS_PORT,
+            decode_responses=True,
+            socket_connect_timeout=3,
+            socket_timeout=3,
+        )
+        # Verify connection
+        await _redis.ping()
+        _redis_available = True
+        logger.info(f"Redis connected at {REDIS_HOST}:{REDIS_PORT}")
+        return _redis
+    except Exception as e:
+        _redis_available = False
+        logger.warning(f"Redis unavailable at {REDIS_HOST}:{REDIS_PORT}: {e}")
+        _redis = None
+        return None
+
+
+async def _publish_to_stream(stream: str, fields: dict[str, str]) -> None:
+    """Publish an event to a Redis Stream. Non-blocking on failure."""
+    try:
+        client = await _get_redis()
+        if client is None:
+            return
+        await client.xadd(stream, fields)  # type: ignore[arg-type]
+        logger.debug(f"Published to Redis stream '{stream}'")
+    except Exception as e:
+        global _redis_available
+        _redis_available = False
+        logger.warning(f"Failed to publish to Redis stream '{stream}': {e}")
+        # Reset connection so next attempt re-creates it
+        global _redis
+        if _redis is not None:
+            try:
+                await _redis.aclose()
+            except Exception:
+                pass
+            _redis = None
+
 
 # ── In-Memory Cache ──────────────────────────────────────────────────────────
 _cache: dict[str, Any] = {}
@@ -141,6 +201,31 @@ def _compute_threat_level(data: dict[str, Any]) -> str:
     if fire_count >= 100:
         score += 1
 
+    # GPS jamming severity
+    gps_jamming = data.get("gps_jamming", [])
+    severe_jamming = [g for g in gps_jamming if g.get("severity") == "severe"]
+    moderate_jamming = [g for g in gps_jamming if g.get("severity") == "moderate"]
+    if len(severe_jamming) >= 3:
+        score += 2
+    elif len(severe_jamming) >= 1 or len(moderate_jamming) >= 3:
+        score += 1
+
+    # UAV / drone activity
+    uav_count = len(data.get("uavs", []))
+    if uav_count >= 10:
+        score += 1
+
+    # LiveUAMap conflict events
+    liveuamap_events = data.get("liveuamap", [])
+    conflict_events = [e for e in liveuamap_events if e.get("eventType") == "conflict"]
+    if len(conflict_events) >= 5:
+        score += 1
+
+    # SIGINT activity
+    sigint_data = data.get("sigint", [])
+    if len(sigint_data) >= 50:
+        score += 1
+
     # Map score to threat level
     if score >= 8:
         return "critical"
@@ -152,6 +237,29 @@ def _compute_threat_level(data: dict[str, Any]) -> str:
         return "medium"
     else:
         return "low"
+
+
+# ── Scraper Fallback Results ─────────────────────────────────────────────────
+
+
+def _empty_result_for(name: str) -> Any:
+    """Return the appropriate empty result for a given scraper name.
+
+    Most scrapers return [], but flights and sigint return dicts.
+    """
+    if name == "flights":
+        return {
+            "military_flights": [],
+            "commercial_flights": [],
+            "tracked_flights": [],
+            "private_jets": [],
+        }
+    if name == "sigint":
+        return {
+            "sigint": [],
+            "sigint_totals": {"meshtastic": 0, "aprs": 0},
+        }
+    return []
 
 
 # ── Data Aggregation ─────────────────────────────────────────────────────────
@@ -178,27 +286,35 @@ async def _fetch_all_data() -> dict[str, Any]:
             return await asyncio.wait_for(coro, timeout=SCRAPER_TIMEOUT)
         except asyncio.TimeoutError:
             logger.error(f"Scraper {name} timed out after {SCRAPER_TIMEOUT}s")
-            return [] if name != "flights" else {"military_flights": [], "commercial_flights": [], "tracked_flights": [], "private_jets": []}
+            return _empty_result_for(name)
         except Exception as e:
             logger.error(f"Scraper {name} failed: {e}")
-            return [] if name != "flights" else {"military_flights": [], "commercial_flights": [], "tracked_flights": [], "private_jets": []}
+            return _empty_result_for(name)
 
     (
         earthquakes,
         fires,
         flight_data,
         gdelt,
+        gps_jamming,
+        liveuamap,
         news,
-        weather_alerts,
         ships,
+        sigint_data,
+        uavs,
+        weather_alerts,
     ) = await asyncio.gather(
         _safe(fetch_earthquakes(client), "earthquakes"),
         _safe(fetch_fires(client), "fires"),
         _safe(fetch_flights(client), "flights"),
         _safe(fetch_gdelt(client), "gdelt"),
+        _safe(fetch_gps_jamming(client), "gps_jamming"),
+        _safe(fetch_liveuamap(client), "liveuamap"),
         _safe(fetch_news(client), "news"),
-        _safe(fetch_weather_alerts(client), "weather"),
         _safe(fetch_ships(client), "ships"),
+        _safe(fetch_sigint(client), "sigint"),
+        _safe(fetch_uavs(client), "uavs"),
+        _safe(fetch_weather_alerts(client), "weather"),
     )
 
     # Extract flight categories
@@ -206,6 +322,10 @@ async def _fetch_all_data() -> dict[str, Any]:
     commercial_flights = flight_data.get("commercial_flights", []) if isinstance(flight_data, dict) else []
     tracked_flights = flight_data.get("tracked_flights", []) if isinstance(flight_data, dict) else []
     private_jets = flight_data.get("private_jets", []) if isinstance(flight_data, dict) else []
+
+    # Extract sigint data
+    sigint = sigint_data.get("sigint", []) if isinstance(sigint_data, dict) else []
+    sigint_totals = sigint_data.get("sigint_totals", {"meshtastic": 0, "aprs": 0}) if isinstance(sigint_data, dict) else {"meshtastic": 0, "aprs": 0}
 
     # Assemble the full data payload
     payload: dict[str, Any] = {
@@ -216,14 +336,14 @@ async def _fetch_all_data() -> dict[str, Any]:
         "gdelt": gdelt,
         "news": news,
         "firms_fires": fires,
-        "gps_jamming": [],
+        "gps_jamming": gps_jamming,
         "weather_alerts": weather_alerts,
-        "uavs": [],
-        "liveuamap": [],
+        "uavs": uavs,
+        "liveuamap": liveuamap,
         "correlations": [],
         "crowdthreat": [],
-        "sigint": [],
-        "sigint_totals": {"meshtastic": 0, "aprs": 0},
+        "sigint": sigint,
+        "sigint_totals": sigint_totals,
         "tracked_flights": tracked_flights,
         "private_jets": private_jets,
         "commercial_flights": commercial_flights,
@@ -240,8 +360,19 @@ async def _fetch_all_data() -> dict[str, Any]:
         f"eq={len(earthquakes)}, fires={len(fires)}, "
         f"mil_flights={len(military_flights)}, "
         f"news={len(news)}, gdelt={len(gdelt)}, "
-        f"wx_alerts={len(weather_alerts)}"
+        f"wx_alerts={len(weather_alerts)}, "
+        f"gps_jamming={len(gps_jamming)}, uavs={len(uavs)}, "
+        f"liveuamap={len(liveuamap)}, sigint={len(sigint)}"
     )
+
+    # Publish data-refreshed event to Redis Stream
+    data_json = json.dumps(payload, default=str)
+    await _publish_to_stream("whatomate:osint_events", {
+        "event_type": "osint.data_refreshed",
+        "source": "shadowbroker-osint",
+        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+        "data_json": data_json[:4000],
+    })
 
     return payload
 
@@ -292,6 +423,32 @@ def _generate_summary(data: dict[str, Any]) -> str:
     news = data.get("news", [])
     if news:
         parts.append(f"Intelligence feed: {len(news)} recent article(s) from global sources.")
+
+    # GPS Jamming
+    gps_jam = data.get("gps_jamming", [])
+    if gps_jam:
+        severe = [g for g in gps_jam if g.get("severity") == "severe"]
+        parts.append(f"GPS interference: {len(gps_jam)} region(s) affected, {len(severe)} severe.")
+
+    # UAVs
+    uavs = data.get("uavs", [])
+    if uavs:
+        parts.append(f"Drone activity: {len(uavs)} UAV(s) tracked.")
+
+    # LiveUAMap
+    lum = data.get("liveuamap", [])
+    if lum:
+        conflict = [e for e in lum if e.get("eventType") == "conflict"]
+        parts.append(f"Conflict map: {len(lum)} event(s), {len(conflict)} armed conflict(s).")
+
+    # SIGINT
+    sigint = data.get("sigint", [])
+    sigint_totals = data.get("sigint_totals", {})
+    if sigint:
+        parts.append(
+            f"Signals intelligence: {sigint_totals.get('meshtastic', 0)} Meshtastic, "
+            f"{sigint_totals.get('aprs', 0)} APRS signals detected."
+        )
 
     return " ".join(parts)
 
@@ -387,6 +544,71 @@ def _generate_report(data: dict[str, Any]) -> str:
             lines.append(f"  • {g.get('name', 'N/A')}")
     else:
         lines.append("  No GDELT events retrieved.")
+    lines.append("")
+
+    # GPS Jamming
+    lines.append("─" * 40)
+    lines.append("GPS JAMMING / SPOOFING")
+    lines.append("─" * 40)
+    gps_jam = data.get("gps_jamming", [])
+    if gps_jam:
+        for g in gps_jam[:10]:
+            lines.append(
+                f"  • [{g.get('severity', '?').upper()}] {g.get('region', 'N/A')}"
+            )
+    else:
+        lines.append("  No GPS jamming data available.")
+    lines.append("")
+
+    # UAVs
+    lines.append("─" * 40)
+    lines.append("UAV / DRONE ACTIVITY")
+    lines.append("─" * 40)
+    uavs = data.get("uavs", [])
+    if uavs:
+        for u in uavs[:10]:
+            lines.append(
+                f"  • {u.get('callsign', 'N/A')} | {u.get('type', 'N/A')} | "
+                f"Alt: {u.get('altitude', 0):.0f}m | {u.get('zone', 'N/A')}"
+            )
+        if len(uavs) > 10:
+            lines.append(f"  ... and {len(uavs) - 10} more")
+    else:
+        lines.append("  No UAV activity tracked.")
+    lines.append("")
+
+    # LiveUAMap
+    lines.append("─" * 40)
+    lines.append("LIVEUAMAP CONFLICT EVENTS")
+    lines.append("─" * 40)
+    lum = data.get("liveuamap", [])
+    if lum:
+        for e in lum[:10]:
+            lines.append(
+                f"  • [{e.get('eventType', '?').upper()}] {e.get('title', 'N/A')}"
+            )
+        if len(lum) > 10:
+            lines.append(f"  ... and {len(lum) - 10} more")
+    else:
+        lines.append("  No LiveUAMap events retrieved.")
+    lines.append("")
+
+    # SIGINT
+    lines.append("─" * 40)
+    lines.append("SIGNALS INTELLIGENCE (SIGINT)")
+    lines.append("─" * 40)
+    sigint = data.get("sigint", [])
+    sigint_totals = data.get("sigint_totals", {})
+    lines.append(
+        f"  Meshtastic nodes: {sigint_totals.get('meshtastic', 0)} | "
+        f"APRS signals: {sigint_totals.get('aprs', 0)}"
+    )
+    if sigint:
+        for s in sigint[:5]:
+            lines.append(
+                f"  • [{s.get('type', '?').upper()}] {s.get('callsign', 'N/A')} | "
+                f"{s.get('frequency', 'N/A')}"
+            )
     lines.append("")
 
     lines.append("=" * 60)
@@ -499,7 +721,64 @@ def _transform_to_osint_snapshot(data: dict[str, Any]) -> dict[str, Any]:
             "category": n.get("category", ""),
         })
 
-    return {
+    # ── GPS Jamming ──
+    gps_jamming = []
+    for g in data.get("gps_jamming", []):
+        gps_jamming.append({
+            "region": g.get("region", ""),
+            "lat": g.get("lat", 0),
+            "lon": g.get("lon", 0),
+            "severity": g.get("severity", "low"),
+            "description": g.get("description", ""),
+            "time": g.get("time", ""),
+            "source": g.get("source", "GPSJam"),
+        })
+
+    # ── UAVs ──
+    uavs = []
+    for u in data.get("uavs", []):
+        uavs.append({
+            "callsign": u.get("callsign", ""),
+            "type": u.get("type", ""),
+            "altitude": u.get("altitude", 0),
+            "lat": u.get("lat", 0),
+            "lon": u.get("lon", 0),
+            "heading": u.get("heading", 0),
+            "zone": u.get("zone", ""),
+            "time": u.get("time", ""),
+        })
+
+    # ── LiveUAMap ──
+    liveuamap = []
+    for e in data.get("liveuamap", []):
+        liveuamap.append({
+            "title": e.get("title", ""),
+            "description": e.get("description", ""),
+            "lat": e.get("lat", 0),
+            "lon": e.get("lon", 0),
+            "eventType": e.get("eventType", "military"),
+            "time": e.get("time", ""),
+            "source": e.get("source", "LiveUAMap"),
+        })
+
+    # ── SIGINT ──
+    sigint = []
+    for s in data.get("sigint", []):
+        sigint.append({
+            "type": s.get("type", ""),
+            "callsign": s.get("callsign", ""),
+            "frequency": s.get("frequency", ""),
+            "lat": s.get("lat", 0),
+            "lon": s.get("lon", 0),
+            "altitude": s.get("altitude", 0),
+            "time": s.get("time", ""),
+            "source": s.get("source", ""),
+            "message": s.get("message", ""),
+        })
+
+    sigint_totals = data.get("sigint_totals", {"meshtastic": 0, "aprs": 0})
+
+    snapshot = {
         "earthquakes": earthquakes,
         "flights": flights,
         "weather": weather,
@@ -507,7 +786,14 @@ def _transform_to_osint_snapshot(data: dict[str, Any]) -> dict[str, Any]:
         "ships": ships,
         "gdelt": gdelt,
         "news": news,
+        "gpsJamming": gps_jamming,
+        "uavs": uavs,
+        "liveuamap": liveuamap,
+        "sigint": sigint,
+        "sigintTotals": sigint_totals,
     }
+
+    return snapshot
 
 
 # ── API Endpoints ────────────────────────────────────────────────────────────
@@ -515,8 +801,25 @@ def _transform_to_osint_snapshot(data: dict[str, Any]) -> dict[str, Any]:
 
 @app.get("/api/health")
 async def health_check():
-    """Health check endpoint."""
-    return {"status": "ok", "version": "0.1.0"}
+    """Health check endpoint with Redis status."""
+    redis_status = "unavailable"
+    if _redis_available:
+        try:
+            client = await _get_redis()
+            if client is not None:
+                await client.ping()
+                redis_status = "connected"
+            else:
+                redis_status = "unavailable"
+        except Exception:
+            redis_status = "error"
+    return {
+        "status": "ok",
+        "version": "0.1.0",
+        "redis": redis_status,
+        "redis_host": REDIS_HOST,
+        "redis_port": REDIS_PORT,
+    }
 
 
 @app.get("/api/live-data")
@@ -554,6 +857,23 @@ async def live_data():
         }
 
 
+async def _fetch_and_transform_snapshot() -> dict[str, Any]:
+    """Fetch OSINT data, transform to snapshot, and publish to Redis."""
+    data = await _fetch_all_data()
+    snapshot = _transform_to_osint_snapshot(data)
+
+    # Publish snapshot event to Redis Stream
+    snapshot_json = json.dumps(snapshot, default=str)
+    await _publish_to_stream("whatomate:osint_snapshot", {
+        "event_type": "osint.snapshot_ready",
+        "source": "shadowbroker-osint",
+        "timestamp": datetime.now(tz=timezone.utc).isoformat(),
+        "data_json": snapshot_json[:4000],
+    })
+
+    return snapshot
+
+
 @app.get("/api/live-data/osint-snapshot")
 async def live_data_osint_snapshot():
     """OsintSnapshot-compatible endpoint.
@@ -563,8 +883,7 @@ async def live_data_osint_snapshot():
     /api/live-data endpoint unchanged for backward compatibility.
     """
     try:
-        data = await _fetch_all_data()
-        return _transform_to_osint_snapshot(data)
+        return await _fetch_and_transform_snapshot()
     except Exception as e:
         logger.error(f"Error in /api/live-data/osint-snapshot: {e}")
         return _transform_to_osint_snapshot({
@@ -576,6 +895,11 @@ async def live_data_osint_snapshot():
             "ships": [],
             "gdelt": [],
             "news": [],
+            "gps_jamming": [],
+            "uavs": [],
+            "liveuamap": [],
+            "sigint": [],
+            "sigint_totals": {"meshtastic": 0, "aprs": 0},
         })
 
 
@@ -614,7 +938,12 @@ async def ai_report():
 
 @app.on_event("startup")
 async def startup():
-    """Warm up the cache on startup (with timeout so server starts regardless)."""
+    """Warm up the cache on startup. Redis check is deferred to first use (lazy)."""
+    # Redis connection is lazy — _get_redis() will be called on first publish.
+    # No blocking check here to avoid startup hangs when Redis is unavailable.
+    logger.info(f"Redis will be connected lazily at {REDIS_HOST}:{REDIS_PORT} (if available)")
+
+    # Warm cache
     logger.info("Shadowbroker OSINT starting up — warming cache...")
     try:
         await asyncio.wait_for(_fetch_all_data(), timeout=35)
@@ -627,10 +956,16 @@ async def startup():
 
 @app.on_event("shutdown")
 async def shutdown():
-    """Clean up HTTP client on shutdown."""
-    global _http_client
+    """Clean up HTTP client and Redis connection on shutdown."""
+    global _http_client, _redis
     if _http_client and not _http_client.is_closed:
         await _http_client.aclose()
+    if _redis is not None:
+        try:
+            await _redis.aclose()
+        except Exception:
+            pass
+        _redis = None
     logger.info("Shadowbroker OSINT shut down")
 
 

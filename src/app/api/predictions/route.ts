@@ -1,10 +1,20 @@
 import { NextResponse } from 'next/server';
+import { fetchService } from '@/lib/intelligence/service-client';
 import { db } from '@/lib/db';
 
 // ===== GET /api/predictions =====
 // Returns recent predictions, accuracy stats, and upcoming predictions
 
 async function _GET() {
+  // ===== Try Go backend first =====
+  const goResult = await fetchService<Record<string, unknown>>('goBackend', '/predictions');
+  if (!goResult.error && goResult.data) {
+    return NextResponse.json(goResult.data);
+  }
+
+  // ===== Fallback to local Next.js intelligence engine =====
+  console.warn('[api/predictions] Go backend unavailable, using local fallback:', goResult.error);
+
   const now = new Date();
   const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 

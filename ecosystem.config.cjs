@@ -108,8 +108,8 @@ module.exports = {
     // ─── 5. Shadowbroker OSINT Backend (port 8000) ──────────────────────
     {
       name: 'shadowbroker-osint',
-      cwd: '/home/z/shadowbroker',
-      script: '/home/z/shadowbroker/venv/bin/python3 -m uvicorn main:app --host 0.0.0.0 --port 8000',
+      cwd: '/home/z/my-project/shadowbroker-osint',
+      script: 'python3 -m uvicorn main:app --host 0.0.0.0 --port 8000',
       interpreter: 'none',
       env: {
         PYTHONUNBUFFERED: '1',
@@ -147,8 +147,9 @@ module.exports = {
         TELEGRAM_CHAT_ID: secrets.TELEGRAM_CHAT_ID || process.env.TELEGRAM_CHAT_ID || '',
         TELETHON_URL: 'http://localhost:8700',
         SHADOWBROKER_URL: 'http://localhost:8660',
+        SHADOWBROKER_OSINT_URL: 'http://localhost:8000',
         COGNITIVE_URL: 'http://localhost:8645',
-        DEERFLOW_URL: 'http://localhost:8000',
+        BACKEND_URL: 'http://localhost:8080',
         WHATSAPP_BRIDGE_URL: 'http://localhost:3001',
         OPENROUTER_API_KEY: secrets.OPENROUTER_API_KEY || process.env.OPENROUTER_API_KEY || '',
         OPENROUTER_MODEL: secrets.OPENROUTER_MODEL || process.env.OPENROUTER_MODEL || 'deepseek/deepseek-chat-v3-0324',

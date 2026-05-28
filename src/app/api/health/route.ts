@@ -1,13 +1,23 @@
 import { NextResponse } from 'next/server';
+import { fetchService } from '@/lib/intelligence/service-client';
 import { healthRegistry } from '@/lib/intelligence/health-check';
 
 /**
  * GET /api/health
  *
  * Returns the health status of all registered microservices.
- * Runs health checks first, then returns the results.
+ * Tries Go backend first, then falls back to local health checks.
  */
 export async function GET() {
+  // ===== Try Go backend first =====
+  const goResult = await fetchService<Record<string, unknown>>('goBackend', '/health');
+  if (!goResult.error && goResult.data) {
+    return NextResponse.json(goResult.data);
+  }
+
+  // ===== Fallback to local Next.js intelligence engine =====
+  console.warn('[api/health] Go backend unavailable, using local fallback:', goResult.error);
+
   try {
     const results = await healthRegistry.runAll();
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withAuth } from '@/lib/intelligence/auth';
+import { fetchService } from '@/lib/intelligence/service-client';
 import { db } from '@/lib/db';
 import { strategyRegistry } from '@/lib/intelligence/strategies';
 import type { StrategyContext } from '@/lib/intelligence/types';
@@ -13,6 +14,15 @@ const DEFAULT_DIMENSIONS = [
 ];
 
 async function _GET() {
+  // ===== Try Go backend first =====
+  const goResult = await fetchService<Record<string, unknown>>('goBackend', '/strategies');
+  if (!goResult.error && goResult.data) {
+    return NextResponse.json(goResult.data);
+  }
+
+  // ===== Fallback to local Next.js intelligence engine =====
+  console.warn('[api/strategies] Go backend unavailable, using local fallback:', goResult.error);
+
   // Get real threshold configs from DB
   const thresholds = await db.thresholdConfig.findMany({
     where: { enabled: true },
@@ -85,6 +95,23 @@ async function _GET() {
 }
 
 async function _PUT(request: Request) {
+  // ===== Try Go backend first for write operations =====
+  try {
+    const body = await request.json();
+    const goResult = await fetchService<Record<string, unknown>>('goBackend', '/strategies', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!goResult.error && goResult.data) {
+      return NextResponse.json(goResult.data);
+    }
+    console.warn('[api/strategies] Go backend PUT unavailable, using local fallback:', goResult.error);
+  } catch {
+    console.warn('[api/strategies] Go backend PUT failed, using local fallback');
+  }
+
+  // ===== Fallback to local =====
   const body = await request.json();
 
   // Update threshold configuration
@@ -119,8 +146,24 @@ async function _PUT(request: Request) {
 }
 
 // ===== POST: Execute a strategy evaluation =====
-// Body: { type: 'consensus' | 'threshold' | 'pattern' | 'risk_scoring' | 'predictive' | 'adaptive' }
 async function _POST(request: NextRequest) {
+  // ===== Try Go backend first =====
+  try {
+    const bodyText = await request.text();
+    const goResult = await fetchService<Record<string, unknown>>('goBackend', '/strategies', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: bodyText,
+    });
+    if (!goResult.error && goResult.data) {
+      return NextResponse.json(goResult.data);
+    }
+    console.warn('[api/strategies] Go backend POST unavailable, using local fallback:', goResult.error);
+  } catch {
+    console.warn('[api/strategies] Go backend POST failed, using local fallback');
+  }
+
+  // ===== Fallback to local =====
   try {
     const body = await request.json();
     const strategyType = body.type as string;

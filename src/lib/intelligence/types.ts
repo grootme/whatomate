@@ -349,12 +349,19 @@ export interface OsintSnapshot {
 
 // ===== SERVICE ENDPOINTS =====
 export const SERVICE_ENDPOINTS = {
-  whatsapp: { host: 'localhost', port: 3001, basePath: '/api' },
-  telegram: { host: 'localhost', port: 8700, basePath: '' },
-  osint: { host: 'localhost', port: 8000, basePath: '' },
-  cognitive: { host: 'localhost', port: 8645, basePath: '' },
-  hermes: { host: 'localhost', port: 8642, basePath: '' },
-  shadowbrokerAi: { host: 'localhost', port: 8660, basePath: '' },
-  backend: { host: 'localhost', port: 8080, basePath: '/api' },
-  dashboard: { host: 'localhost', port: 3002, basePath: '' },
+  whatsapp: { host: 'localhost', port: 3001, basePath: '/api', direct: false as const },
+  telegram: { host: 'localhost', port: 8700, basePath: '', direct: false as const },
+  osint: { host: 'localhost', port: 8000, basePath: '', direct: false as const },
+  cognitive: { host: 'localhost', port: 8645, basePath: '', direct: false as const },
+  hermes: { host: 'localhost', port: 8642, basePath: '', direct: false as const },
+  shadowbrokerAi: { host: 'localhost', port: 8660, basePath: '', direct: false as const },
+  backend: { host: 'localhost', port: 8080, basePath: '/api', direct: false as const },
+  dashboard: { host: 'localhost', port: 3002, basePath: '', direct: false as const },
+  goBackend: {
+    host: process.env.GO_BACKEND_HOST || 'localhost',
+    port: parseInt(process.env.GO_BACKEND_PORT || '8080'),
+    protocol: process.env.GO_BACKEND_PROTOCOL || 'http',
+    basePath: '/api/intel',
+    direct: true as const,
+  },
 } as const;

@@ -1,6 +1,8 @@
 """Shadowbroker OSINT Backend Configuration"""
 
-PORT = 8000
+import os
+
+PORT = int(os.environ.get("OSINT_PORT", 8000))
 CACHE_DURATION = 300  # 5 minutes cache for scraped data
 USER_AGENT = "Shadowbroker-OSINT/0.1.0"
 
@@ -24,6 +26,29 @@ RSS_FEEDS = [
 
 # Military callsign prefixes
 MILITARY_CALLSIGNS = ["RCH", "EVAC", "PANS", "REACH", "DUKE", "NCR", "VIVID", "ASCOT", "CROS", "TITAN", "BART", "SLAY", "QID", "DRGN", "MULE"]
+
+# UAV / Drone callsign prefixes
+UAV_CALLSIGN_PREFIXES = ["UAV", "RPA", "DRN", "MQ", "RQ", "GAU", "TUAV"]
+
+# GPS Jamming
+GPSJAM_API_URL = "https://gpsjam.org/api/v1/current"
+GPSJAM_HTML_URL = "https://gpsjam.org"
+
+# FAA NOTAMs
+FAA_NOTAM_URL = "https://notams.aim.faa.gov/notamSearch/search"
+
+# LiveUAMap
+LIVEUAMAP_JSON_URL = "https://liveuamap.com/export/3613b9e4f7f246e5b5c1c1ee067c4c42"
+LIVEUAMAP_HTML_URL = "https://liveuamap.com"
+
+# SIGINT sources
+MESHTASTIC_API_URL = "https://map.meshverse.com/api/nodes"
+APRS_API_URL = "https://api.aprs.fi/api/get"
+APRS_API_KEY = ""  # Optional: set to your APRS.fi API key for higher limits
+
+# Redis
+REDIS_HOST = os.environ.get("REDIS_HOST", "localhost")
+REDIS_PORT = int(os.environ.get("REDIS_PORT", 6379))
 
 # HTTP client settings
 HTTP_TIMEOUT = 15.0

@@ -17,7 +17,7 @@
 export interface ToolDefinition {
   name: string
   description: string
-  category: 'telegram' | 'osint' | 'cognitive' | 'whatsapp' | 'research' | 'system' | 'mcp'
+  category: 'telegram' | 'osint' | 'cognitive' | 'whatsapp' | 'research' | 'system' | 'mcp' | 'intelligence'
   parameters: Record<string, any> // OpenAI function calling format
   execute: (params: Record<string, any>) => Promise<any>
   // For event-driven/reactive tools (background workers, not AI-callable)

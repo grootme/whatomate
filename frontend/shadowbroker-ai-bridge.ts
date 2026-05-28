@@ -34,8 +34,9 @@ import { toolRegistry } from './lib/shadowbroker/tools/index.js'
 
 const SHADOWBROKER_URL = process.env.SHADOWBROKER_URL || 'http://localhost:8000'
 const COGNITIVE_URL = process.env.COGNITIVE_URL || 'http://localhost:8645'
-const HERMES_URL = process.env.HERMES_URL || 'http://localhost:3001'
+const HERMES_URL = process.env.HERMES_URL || 'http://localhost:8642'
 const BUNDLE_URL = process.env.BUNDLE_URL || 'http://localhost:8650'
+const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8080'
 const BRIDGE_PORT = parseInt(process.env.BRIDGE_PORT || '8660')
 
 const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || ''

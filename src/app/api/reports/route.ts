@@ -1,8 +1,18 @@
 import { NextResponse } from 'next/server';
+import { fetchService } from '@/lib/intelligence/service-client';
 import { db } from '@/lib/db';
 import { generateReport } from '@/lib/intelligence/report-generator';
 
 export async function GET() {
+  // ===== Try Go backend first =====
+  const goResult = await fetchService<Record<string, unknown>>('goBackend', '/reports');
+  if (!goResult.error && goResult.data) {
+    return NextResponse.json(goResult.data);
+  }
+
+  // ===== Fallback to local Next.js intelligence engine =====
+  console.warn('[api/reports] Go backend unavailable, using local fallback:', goResult.error);
+
   const reports = await db.report.findMany({
     orderBy: { createdAt: 'desc' },
     take: 20,

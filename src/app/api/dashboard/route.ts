@@ -1,7 +1,17 @@
 import { NextResponse } from 'next/server';
+import { fetchService } from '@/lib/intelligence/service-client';
 import { db } from '@/lib/db';
 
 export async function GET() {
+  // ===== Try Go backend first =====
+  const goResult = await fetchService<Record<string, unknown>>('goBackend', '/dashboard');
+  if (!goResult.error && goResult.data) {
+    return NextResponse.json(goResult.data);
+  }
+
+  // ===== Fallback to local Next.js intelligence engine =====
+  console.warn('[api/dashboard] Go backend unavailable, using local fallback:', goResult.error);
+
   try {
     // Compute dashboard stats from real DB data
     const [
@@ -135,8 +145,6 @@ export async function GET() {
     );
 
     // ===== Threat Level Computation =====
-    // Based on enabled thresholds where currentValue >= value,
-    // accumulate severity points: CRÍTICA=4, ALTA=3, MEDIA=2, BAJA=1, INFO=0
     const enabledThresholds = await db.thresholdConfig.findMany({
       where: { enabled: true },
     });

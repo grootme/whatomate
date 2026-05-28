@@ -16,6 +16,7 @@ import (
         "github.com/shridarpatil/whatomate/internal/database"
         "github.com/shridarpatil/whatomate/internal/frontend"
         "github.com/shridarpatil/whatomate/internal/handlers"
+        "github.com/shridarpatil/whatomate/internal/intelligence"
         "github.com/shridarpatil/whatomate/internal/middleware"
         "github.com/shridarpatil/whatomate/internal/queue"
         "github.com/shridarpatil/whatomate/internal/websocket"
@@ -207,6 +208,11 @@ func runServer(args []string) {
                 HTTPClient: httpClient,
         }
 
+        // Initialize intelligence service
+        intelService := intelligence.NewIntelligenceService(db, rdb, httpClient, lo, "")
+        app.IntelService = intelService
+        lo.Info("Intelligence service initialized")
+
         // Register incoming message handler for WhatsApp clients
         waClient.SetIncomingMessageHandler(app.ProcessWhatsmeowMessage)
 
@@ -252,6 +258,11 @@ func runServer(args []string) {
         go slaProcessor.Start(slaCtx)
         lo.Info("SLA processor started")
 
+        // Start intelligence scheduler (OSINT ingestion + analysis + strategy evaluation)
+        intelCtx, intelCancel := context.WithCancel(context.Background())
+        intelService.StartScheduler(intelCtx)
+        lo.Info("Intelligence scheduler started")
+
         // Start embedded workers
         var workers []*worker.Worker
         var workerCancel context.CancelFunc
@@ -296,6 +307,12 @@ func runServer(args []string) {
         slaCancel()
         slaProcessor.Stop()
         lo.Info("SLA processor stopped")
+
+        // Stop intelligence scheduler
+        lo.Info("Stopping intelligence scheduler...")
+        intelCancel()
+        intelService.StopScheduler()
+        lo.Info("Intelligence scheduler stopped")
 
         // Stop workers first
         if workerCancel != nil {
@@ -732,6 +749,30 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
         g.GET("/api/products/{id}", app.GetCatalogProduct)
         g.PUT("/api/products/{id}", app.UpdateCatalogProduct)
         g.DELETE("/api/products/{id}", app.DeleteCatalogProduct)
+
+        // Intelligence Engine API
+        g.GET("/api/intel/dashboard", app.GetIntelDashboard)
+        g.GET("/api/intel/events", app.GetIntelEvents)
+        g.GET("/api/intel/events/replay", app.GetIntelEventsReplay)
+        g.GET("/api/intel/entities", app.GetIntelEntities)
+        g.POST("/api/intel/ingestion/whatsapp", app.IngestWhatsAppMessage)
+        g.POST("/api/intel/ingestion/telegram", app.IngestTelegramMessage)
+        g.POST("/api/intel/ingestion/osint", app.IngestOSINTData)
+        g.POST("/api/intel/processing", app.ProcessIntelMessages)
+        g.POST("/api/intel/correlation", app.RunIntelCorrelation)
+        g.GET("/api/intel/threat-feed", app.GetIntelThreatFeed)
+        g.GET("/api/intel/threat-level", app.GetIntelThreatLevel)
+        g.GET("/api/intel/anomalies", app.GetIntelAnomalies)
+        g.GET("/api/intel/alerts", app.GetIntelAlerts)
+        g.GET("/api/intel/agents", app.GetIntelAgents)
+        g.GET("/api/intel/notifications", app.GetIntelNotifications)
+        g.GET("/api/intel/predictions", app.GetIntelPredictions)
+        g.POST("/api/intel/reports/generate", app.GenerateIntelReport)
+        g.GET("/api/intel/reports", app.GetIntelReports)
+        g.GET("/api/intel/strategies", app.GetIntelStrategies)
+        g.GET("/api/intel/health", app.GetIntelHealth)
+        g.POST("/api/intel/scheduler/run", app.RunIntelScheduler)
+        g.GET("/api/intel/scheduler/status", app.GetIntelSchedulerStatus)
 
         // Serve embedded frontend (SPA)
         if frontend.IsEmbedded() {

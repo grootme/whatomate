@@ -12,6 +12,7 @@ import { cognitiveTools } from './cognitive-tools.js'
 import { whatsappTools } from './whatsapp-tools.js'
 import { researchTools } from './research-tools.js'
 import { systemTools } from './system-tools.js'
+import { backendTools } from './backend-tools.js'
 
 /**
  * All AI-callable tools, ready to be registered in the ToolRegistry.
@@ -23,6 +24,7 @@ export const allTools: ToolDefinition[] = [
   ...whatsappTools,
   ...researchTools,
   ...systemTools,
+  ...backendTools,
 ]
 
 /**
@@ -39,3 +41,4 @@ export { cognitiveTools } from './cognitive-tools.js'
 export { whatsappTools } from './whatsapp-tools.js'
 export { researchTools } from './research-tools.js'
 export { systemTools } from './system-tools.js'
+export { backendTools } from './backend-tools.js'
