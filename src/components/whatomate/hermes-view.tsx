@@ -169,11 +169,19 @@ export function HermesView() {
       const res = await fetch('/api/hermes');
       if (res.ok) {
         const json = await res.json();
-        setData(json);
+        // Merge with defaults so missing arrays/fields don't crash the UI
+        setData(prev => ({
+          ...prev,
+          ...json,
+          activePlatforms: Array.isArray(json.activePlatforms) ? json.activePlatforms : prev.activePlatforms,
+          messages: Array.isArray(json.messages) ? json.messages : prev.messages,
+          skills: Array.isArray(json.skills) ? json.skills : prev.skills,
+          cronJobs: Array.isArray(json.cronJobs) ? json.cronJobs : prev.cronJobs,
+        }));
         setAgentModel(json.agentModel || defaultHermesData.agentModel);
         setTemperature(json.temperature ?? defaultHermesData.temperature);
         setMaxIterations(json.maxIterations ?? defaultHermesData.maxIterations);
-        setSkills(json.skills || defaultHermesData.skills);
+        setSkills(Array.isArray(json.skills) ? json.skills : defaultHermesData.skills);
       }
     } catch {
       // Use default data

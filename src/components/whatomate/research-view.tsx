@@ -207,7 +207,16 @@ export function ResearchView() {
       const res = await fetch('/api/deerflow');
       if (res.ok) {
         const json = await res.json();
-        setData(json);
+        // Merge with defaults so missing fields don't crash the UI
+        setData(prev => ({
+          ...prev,
+          ...json,
+          runs: Array.isArray(json.runs) ? json.runs : prev.runs,
+          agents: Array.isArray(json.agents) ? json.agents : prev.agents,
+          skills: Array.isArray(json.skills) ? json.skills : prev.skills,
+          availableModels: Array.isArray(json.availableModels) ? json.availableModels : prev.availableModels,
+          status: json.status ?? prev.status,
+        }));
       }
     } catch {
       // Use default data
@@ -240,10 +249,12 @@ export function ResearchView() {
       });
       if (res.ok) {
         const json = await res.json();
-        setData(prev => ({
-          ...prev,
-          runs: [json.run, ...prev.runs],
-        }));
+        if (json.run) {
+          setData(prev => ({
+            ...prev,
+            runs: [json.run, ...prev.runs],
+          }));
+        }
         setNewQuery('');
       }
     } catch {
