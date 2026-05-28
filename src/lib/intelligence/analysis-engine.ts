@@ -15,22 +15,51 @@ import { safeEventAppend } from './safe-event';
 import { persistEvent } from './event-persist';
 import type { EventStream } from './types';
 
-// ===== SUSPICIOUS KEYWORDS (single definition) =====
+// ===== SUSPICIOUS KEYWORDS (multi-language: Spanish, English, Portuguese, French) =====
 export const SUSPICIOUS_KEYWORDS = [
+  // Spanish
   'fraude', 'estafa', 'scam', 'crypto', 'invertir', 'dinero',
   'ganancia', 'lucro', 'pirámide', 'ponzi', 'bitcoin', 'ethereum',
   'lavado', 'blanqueo', 'soborno', 'cohecho', 'corrupción',
   'falso', 'enganar', 'estafar', 'robo', 'hack',
+  // English
+  'fraud', 'scam', 'scammer', 'investment', 'money', 'profit',
+  'pyramid', 'ponzi', 'laundering', 'bribe', 'corruption',
+  'fake', 'cheat', 'steal', 'theft', 'hack', 'phishing',
+  'ransomware', 'extortion', 'counterfeit',
+  // Portuguese
+  'fraude', 'golpe', 'golpista', 'investimento', 'dinheiro',
+  'lucro', 'pirâmide', 'lavagem', 'suborno', 'corrupção',
+  'falsificação', 'roubo', 'extorsão',
+  // French
+  'fraude', 'arnaque', 'escroquerie', 'investissement', 'argent',
+  'profit', 'pyramide', 'blanchiment', 'corruption', 'contrefaçon',
+  'vol', 'extorsion',
 ] as const;
 
 // ===== FRAUD KEYWORDS (subset used in ingestion for threshold updates) =====
-export const FRAUD_KEYWORDS = ['fraude', 'estafa', 'scam', 'crypto', 'invertir', 'dinero'] as const;
+export const FRAUD_KEYWORDS = [
+  'fraude', 'estafa', 'scam', 'crypto', 'invertir', 'dinero',
+  'fraud', 'investment', 'money', 'profit', 'phishing',
+  'golpe', 'investimento', 'dinheiro',
+  'arnaque', 'investissement', 'argent',
+] as const;
 
 // ===== LAUNDERING KEYWORDS (for money laundering pattern detection) =====
-export const LAUNDERING_KEYWORDS = ['lavado', 'blanqueo', 'soborno', 'crypto', 'bitcoin'] as const;
+export const LAUNDERING_KEYWORDS = [
+  'lavado', 'blanqueo', 'soborno', 'crypto', 'bitcoin',
+  'laundering', 'bribe', 'cryptocurrency',
+  'lavagem', 'suborno',
+  'blanchiment', 'corruption',
+] as const;
 
 // ===== MIGRATION KEYWORDS (for irregular migration pattern detection) =====
-export const MIGRATION_KEYWORDS = ['migración', 'coyote', 'frontera', 'tráfico'] as const;
+export const MIGRATION_KEYWORDS = [
+  'migración', 'coyote', 'frontera', 'tráfico',
+  'migration', 'smuggling', 'border', 'trafficking', 'coyote',
+  'migração', 'contrabando', 'fronteira', 'tráfico',
+  'migration', 'contrebande', 'frontière', 'trafic',
+] as const;
 
 // ===== ENTITY EXTRACTION PATTERNS =====
 export const ENTITY_PATTERNS: Record<string, { type: string; patterns: RegExp[] }> = {
@@ -64,10 +93,29 @@ export const ENTITY_PATTERNS: Record<string, { type: string; patterns: RegExp[] 
   },
 };
 
-// ===== SENTIMENT SCORING =====
+// ===== SENTIMENT SCORING (multi-language) =====
 
-const NEGATIVE_WORDS = ['fraude', 'estafa', 'scam', 'peligro', 'alerta', 'robo', 'hurto', 'delito', 'crimen', 'muerte', 'amenaza', 'urgente', 'crítico'] as const;
-const POSITIVE_WORDS = ['seguro', 'seguridad', 'protección', 'ayuda', 'apoyo', 'legal', 'justicia', 'confianza'] as const;
+const NEGATIVE_WORDS = [
+  // Spanish
+  'fraude', 'estafa', 'peligro', 'alerta', 'robo', 'hurto', 'delito', 'crimen', 'muerte', 'amenaza', 'urgente', 'crítico',
+  // English
+  'fraud', 'danger', 'alert', 'theft', 'crime', 'death', 'threat', 'urgent', 'critical', 'attack', 'breach', 'exploit',
+  // Portuguese
+  'perigo', 'alerta', 'roubo', 'crime', 'morte', 'ameaça', 'urgente', 'crítico',
+  // French
+  'danger', 'alerte', 'vol', 'crime', 'mort', 'menace', 'urgent', 'critique',
+] as const;
+
+const POSITIVE_WORDS = [
+  // Spanish
+  'seguro', 'seguridad', 'protección', 'ayuda', 'apoyo', 'legal', 'justicia', 'confianza',
+  // English
+  'safe', 'security', 'protection', 'help', 'support', 'legal', 'justice', 'trust', 'verified', 'legitimate',
+  // Portuguese
+  'seguro', 'segurança', 'proteção', 'ajuda', 'legal', 'justiça', 'confiança',
+  // French
+  'sûr', 'sécurité', 'protection', 'aide', 'légal', 'justice', 'confiance',
+] as const;
 
 export function computeSentimentScore(content: string): number {
   const lower = content.toLowerCase();

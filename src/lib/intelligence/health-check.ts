@@ -1,13 +1,19 @@
 /**
- * Health Check Registry — Microservice Health Monitoring
+ * Health Check Registry — Microservice Health Monitoring with DB Persistence
  *
  * Monitors microservice health beyond simple HTTP ping by tracking latency,
  * consecutive failures/successes, and determining status through a
  * multi-signal evaluation.
+ *
+ * Persistence:
+ *  - After each `runOne()`, the result is saved to IntelligenceEvent
+ *  - On startup, previous health states are loaded from DB
+ *  - `getHistory(serviceName, limit)` returns the last N results from DB
  */
 
 import { fetchService } from './service-client';
 import type { SERVICE_ENDPOINTS } from './types';
+import { db } from '@/lib/db';
 
 // ===== Types =====
 
@@ -28,6 +34,7 @@ export interface HealthCheckRegistry {
   runAll(): Promise<HealthCheckResult[]>;
   runOne(service: string): Promise<HealthCheckResult>;
   getStatus(): Record<string, HealthCheckResult>;
+  getHistory(serviceName: string, limit?: number): Promise<HealthCheckResult[]>;
 }
 
 // ===== Service Check Definitions =====
@@ -77,16 +84,99 @@ function determineStatus(
   return 'healthy';
 }
 
+// ===== DB Persistence Helpers =====
+
+/**
+ * Persist a health check result to the IntelligenceEvent table.
+ * Silently catches errors to avoid disrupting the health check flow.
+ */
+async function persistHealthCheck(result: HealthCheckResult): Promise<void> {
+  try {
+    await db.intelligenceEvent.create({
+      data: {
+        eventType: 'health_check.result',
+        aggregateId: `health:${result.service}`,
+        aggregateType: 'health_check',
+        stream: 'whatomate:system',
+        payload: JSON.stringify(result),
+        processed: true,
+      },
+    });
+  } catch (err) {
+    // Silently swallow — persistence should not break health checks
+    console.error(`[health-check] Failed to persist result for ${result.service}:`, err);
+  }
+}
+
+/**
+ * Load the most recent health check result for each service from DB.
+ * Returns a Map of service name → HealthCheckResult.
+ */
+async function loadPreviousStatesFromDB(): Promise<Map<string, HealthCheckResult>> {
+  const previousStates = new Map<string, HealthCheckResult>();
+
+  try {
+    // Get the latest event per service by querying for each aggregate
+    for (const checkDef of SERVICE_CHECKS) {
+      const aggregateId = `health:${checkDef.service}`;
+      const latestEvent = await db.intelligenceEvent.findFirst({
+        where: {
+          eventType: 'health_check.result',
+          aggregateId,
+        },
+        orderBy: { timestamp: 'desc' },
+        take: 1,
+      });
+
+      if (latestEvent) {
+        try {
+          const result = JSON.parse(latestEvent.payload) as HealthCheckResult;
+          previousStates.set(checkDef.service, result);
+        } catch {
+          // Ignore malformed payload
+        }
+      }
+    }
+  } catch (err) {
+    // DB might not be available yet — that's fine, start fresh
+    console.error('[health-check] Failed to load previous states from DB:', err);
+  }
+
+  return previousStates;
+}
+
 // ===== Singleton Registry =====
 
 class HealthCheckRegistryImpl implements HealthCheckRegistry {
   checks: Map<string, HealthCheckResult> = new Map();
+  private initialized = false;
+
+  /**
+   * Initialize the registry by loading previous health states from DB.
+   * Called automatically on first runOne/runAll if not already done.
+   */
+  async initialize(): Promise<void> {
+    if (this.initialized) return;
+
+    const previousStates = await loadPreviousStatesFromDB();
+    for (const [service, result] of previousStates) {
+      this.checks.set(service, result);
+    }
+
+    this.initialized = true;
+  }
 
   /**
    * Run a health check for a single service.
-   * Pings the service endpoint and measures latency, then updates the registry.
+   * Pings the service endpoint and measures latency, then updates the registry
+   * and persists the result to the database.
    */
   async runOne(serviceName: string): Promise<HealthCheckResult> {
+    // Ensure previous states are loaded on first call
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
     const definition = SERVICE_CHECKS.find((s) => s.service === serviceName);
 
     if (!definition) {
@@ -100,6 +190,8 @@ class HealthCheckRegistryImpl implements HealthCheckRegistry {
         metadata: { error: 'Service not registered in health check definitions' },
       };
       this.checks.set(serviceName, unknownResult);
+      // Persist unknown result
+      await persistHealthCheck(unknownResult);
       return unknownResult;
     }
 
@@ -135,6 +227,8 @@ class HealthCheckRegistryImpl implements HealthCheckRegistry {
       };
 
       this.checks.set(serviceName, result);
+      // Persist to DB
+      await persistHealthCheck(result);
       return result;
     } catch (err) {
       const latencyMs = Date.now() - start;
@@ -156,6 +250,8 @@ class HealthCheckRegistryImpl implements HealthCheckRegistry {
       };
 
       this.checks.set(serviceName, result);
+      // Persist to DB
+      await persistHealthCheck(result);
       return result;
     }
   }
@@ -164,6 +260,11 @@ class HealthCheckRegistryImpl implements HealthCheckRegistry {
    * Run all registered health checks in parallel.
    */
   async runAll(): Promise<HealthCheckResult[]> {
+    // Ensure previous states are loaded on first call
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
     const results = await Promise.all(
       SERVICE_CHECKS.map((def) => this.runOne(def.service)),
     );
@@ -180,6 +281,44 @@ class HealthCheckRegistryImpl implements HealthCheckRegistry {
       status[key] = value;
     }
     return status;
+  }
+
+  /**
+   * Get the last N health check results for a service from the database.
+   * Useful for historical analysis, trend charts, and debugging.
+   *
+   * @param serviceName - The service name (e.g., 'whatsapp', 'hermes')
+   * @param limit - Maximum number of results to return (default: 20)
+   * @returns Array of HealthCheckResult ordered by most recent first
+   */
+  async getHistory(serviceName: string, limit: number = 20): Promise<HealthCheckResult[]> {
+    const aggregateId = `health:${serviceName}`;
+
+    try {
+      const events = await db.intelligenceEvent.findMany({
+        where: {
+          eventType: 'health_check.result',
+          aggregateId,
+        },
+        orderBy: { timestamp: 'desc' },
+        take: limit,
+      });
+
+      const results: HealthCheckResult[] = [];
+      for (const event of events) {
+        try {
+          const parsed = JSON.parse(event.payload) as HealthCheckResult;
+          results.push(parsed);
+        } catch {
+          // Skip malformed payloads
+        }
+      }
+
+      return results;
+    } catch (err) {
+      console.error(`[health-check] Failed to load history for ${serviceName}:`, err);
+      return [];
+    }
   }
 }
 

@@ -1,9 +1,14 @@
 /**
  * Rate Limiter & Circuit Breaker — Resilience Patterns for Microservice Calls
  *
- * In-memory rate limiter using sliding window counters and a circuit breaker
+ * Dual-backend rate limiter using sliding window counters and a circuit breaker
  * with closed → open → half-open state machine.
+ *
+ * Primary: SQLite (via Prisma) for persistence across restarts and multi-process.
+ * Fallback: In-memory when DB is unavailable.
  */
+
+import { db } from '@/lib/db';
 
 // ===== Rate Limiter =====
 
@@ -18,16 +23,16 @@ interface RateLimiterEntry {
 }
 
 /**
- * Creates an in-memory rate limiter.
+ * Creates a rate limiter with SQLite persistence.
  *
- * Uses a Map of key → { count, windowStart }.
- * When the current time is past windowStart + windowMs, the counter resets.
+ * Uses SQLite as the primary store for rate limit counters.
+ * Falls back to in-memory Map if DB is unavailable.
  *
  * @returns A function that checks if a request is allowed for a given key.
  */
 export function createRateLimiter(options: RateLimiterOptions) {
   const { maxRequests, windowMs } = options;
-  const entries = new Map<string, RateLimiterEntry>();
+  const memoryEntries = new Map<string, RateLimiterEntry>();
 
   // Periodic cleanup of stale entries to prevent memory leaks
   const CLEANUP_INTERVAL_MS = 60_000; // 1 minute
@@ -37,38 +42,87 @@ export function createRateLimiter(options: RateLimiterOptions) {
     if (now - lastCleanup < CLEANUP_INTERVAL_MS) return;
     lastCleanup = now;
 
-    for (const [key, entry] of entries) {
+    for (const [key, entry] of memoryEntries) {
       if (now - entry.windowStart > windowMs * 2) {
-        entries.delete(key);
+        memoryEntries.delete(key);
       }
     }
   }
 
-  return function checkRateLimit(key: string): {
+  return async function checkRateLimit(key: string): Promise<{
     allowed: boolean;
     remaining: number;
     resetAt: Date;
-  } {
+  }> {
     const now = Date.now();
     cleanup(now);
 
-    let entry = entries.get(key);
+    // Try SQLite-backed storage first
+    try {
+      const STORE_KEY = `ratelimit:${key}`;
+      const stored = await db.intelligenceEvent.findFirst({
+        where: { aggregateId: STORE_KEY, aggregateType: 'rate_limit' },
+        orderBy: { timestamp: 'desc' },
+      });
 
-    // If window expired or no entry exists, start a new window
-    if (!entry || now - entry.windowStart >= windowMs) {
-      entry = { count: 0, windowStart: now };
-      entries.set(key, entry);
+      let entry: RateLimiterEntry;
+      if (stored) {
+        const payload = JSON.parse(stored.payload);
+        if (now - payload.windowStart >= windowMs) {
+          entry = { count: 0, windowStart: now };
+        } else {
+          entry = { count: payload.count, windowStart: payload.windowStart };
+        }
+      } else {
+        entry = { count: 0, windowStart: now };
+      }
+
+      const remaining = Math.max(0, maxRequests - entry.count);
+      const resetAt = new Date(entry.windowStart + windowMs);
+
+      if (entry.count >= maxRequests) {
+        return { allowed: false, remaining: 0, resetAt };
+      }
+
+      entry.count += 1;
+
+      // Persist to SQLite
+      await db.intelligenceEvent.upsert({
+        where: { id: stored?.id ?? 'nonexistent' },
+        create: {
+          eventType: 'rate_limit.check',
+          aggregateId: STORE_KEY,
+          aggregateType: 'rate_limit',
+          stream: 'whatomate:system',
+          payload: JSON.stringify(entry),
+          processed: true,
+        },
+        update: {
+          payload: JSON.stringify(entry),
+          timestamp: new Date(),
+        },
+      });
+
+      return { allowed: true, remaining: remaining - 1, resetAt };
+    } catch {
+      // Fallback to in-memory if DB is unavailable
+      let entry = memoryEntries.get(key);
+
+      if (!entry || now - entry.windowStart >= windowMs) {
+        entry = { count: 0, windowStart: now };
+        memoryEntries.set(key, entry);
+      }
+
+      const remaining = Math.max(0, maxRequests - entry.count);
+      const resetAt = new Date(entry.windowStart + windowMs);
+
+      if (entry.count >= maxRequests) {
+        return { allowed: false, remaining: 0, resetAt };
+      }
+
+      entry.count += 1;
+      return { allowed: true, remaining: remaining - 1, resetAt };
     }
-
-    const remaining = Math.max(0, maxRequests - entry.count);
-    const resetAt = new Date(entry.windowStart + windowMs);
-
-    if (entry.count >= maxRequests) {
-      return { allowed: false, remaining: 0, resetAt };
-    }
-
-    entry.count += 1;
-    return { allowed: true, remaining: remaining - 1, resetAt };
   };
 }
 
@@ -102,10 +156,10 @@ interface CircuitBreakerEntry {
  * @param resetTimeoutMs Time in ms before attempting half-open.
  */
 export function createCircuitBreaker(failureThreshold: number, resetTimeoutMs: number) {
-  const entries = new Map<string, CircuitBreakerEntry>();
+  const memoryEntries = new Map<string, CircuitBreakerEntry>();
 
   function getOrCreate(service: string): CircuitBreakerEntry {
-    let entry = entries.get(service);
+    let entry = memoryEntries.get(service);
     if (!entry) {
       entry = {
         state: 'closed',
@@ -114,7 +168,7 @@ export function createCircuitBreaker(failureThreshold: number, resetTimeoutMs: n
         nextRetry: null,
         halfOpenAttempts: 0,
       };
-      entries.set(service, entry);
+      memoryEntries.set(service, entry);
     }
     return entry;
   }
@@ -126,6 +180,45 @@ export function createCircuitBreaker(failureThreshold: number, resetTimeoutMs: n
       lastFailure: entry.lastFailure,
       nextRetry: entry.nextRetry,
     };
+  }
+
+  /** Persist circuit breaker state to SQLite for cross-process visibility */
+  async function persistState(service: string, entry: CircuitBreakerEntry): Promise<void> {
+    try {
+      const STORE_KEY = `circuit:${service}`;
+      await db.intelligenceEvent.upsert({
+        where: { id: `cb_${service}` },
+        create: {
+          id: `cb_${service}`,
+          eventType: 'circuit_breaker.state',
+          aggregateId: STORE_KEY,
+          aggregateType: 'circuit_breaker',
+          stream: 'whatomate:system',
+          payload: JSON.stringify({
+            service,
+            state: entry.state,
+            failures: entry.failures,
+            lastFailure: entry.lastFailure?.toISOString(),
+            nextRetry: entry.nextRetry?.toISOString(),
+            halfOpenAttempts: entry.halfOpenAttempts,
+          }),
+          processed: true,
+        },
+        update: {
+          payload: JSON.stringify({
+            service,
+            state: entry.state,
+            failures: entry.failures,
+            lastFailure: entry.lastFailure?.toISOString(),
+            nextRetry: entry.nextRetry?.toISOString(),
+            halfOpenAttempts: entry.halfOpenAttempts,
+          }),
+          timestamp: new Date(),
+        },
+      });
+    } catch {
+      // DB unavailable — state stays in-memory only
+    }
   }
 
   /**
@@ -149,6 +242,7 @@ export function createCircuitBreaker(failureThreshold: number, resetTimeoutMs: n
         if (entry.nextRetry && now >= entry.nextRetry) {
           entry.state = 'half-open';
           entry.halfOpenAttempts = 0;
+          persistState(service, entry);
           return { allowed: true, state: toPublicState(entry) };
         }
         return { allowed: false, state: toPublicState(entry) };
@@ -181,6 +275,7 @@ export function createCircuitBreaker(failureThreshold: number, resetTimeoutMs: n
         entry.lastFailure = null;
         entry.nextRetry = null;
         entry.halfOpenAttempts = 0;
+        persistState(service, entry);
         break;
 
       case 'closed':
@@ -211,6 +306,7 @@ export function createCircuitBreaker(failureThreshold: number, resetTimeoutMs: n
         entry.state = 'open';
         entry.nextRetry = new Date(now.getTime() + resetTimeoutMs);
         entry.halfOpenAttempts = 0;
+        persistState(service, entry);
         break;
 
       case 'closed':
@@ -218,12 +314,14 @@ export function createCircuitBreaker(failureThreshold: number, resetTimeoutMs: n
         if (entry.failures >= failureThreshold) {
           entry.state = 'open';
           entry.nextRetry = new Date(now.getTime() + resetTimeoutMs);
+          persistState(service, entry);
         }
         break;
 
       case 'open':
         // Already open, update next retry
         entry.nextRetry = new Date(now.getTime() + resetTimeoutMs);
+        persistState(service, entry);
         break;
     }
   }

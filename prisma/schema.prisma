@@ -149,7 +149,7 @@ model ThresholdConfig {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  @@index([metric])
+  @@unique([metric])
   @@index([enabled])
 }
 

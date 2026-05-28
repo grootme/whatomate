@@ -605,6 +605,233 @@ async function executeMerge(
   };
 }
 
+// ===== INNOVATION 1: Entity Merge Policy with Confidence Scoring =====
+
+/**
+ * Confidence-weighted entity merge. Takes two entity records and merges them
+ * using a confidence-weighted approach:
+ * - Higher confidence entities' data takes precedence
+ * - Merges platformIds from both entities
+ * - Averages risk scores weighted by mention count
+ * - Records a merge event in event sourcing
+ * - Updates all EntityRelations pointing to the merged entity
+ *
+ * Confidence is derived from mentionCount (more mentions = more confident).
+ * If both have 0 mentions, confidence is equal (50/50).
+ */
+
+export interface MergeEntitiesResult {
+  merged: boolean;
+  survivorId: string;
+  absorbedId: string;
+  weightedRiskScore: number;
+  confidenceA: number;
+  confidenceB: number;
+}
+
+export async function mergeEntities(entityAId: string, entityBId: string): Promise<MergeEntitiesResult> {
+  const [entityA, entityB] = await Promise.all([
+    db.entity.findUnique({ where: { id: entityAId } }),
+    db.entity.findUnique({ where: { id: entityBId } }),
+  ]);
+
+  if (!entityA || !entityB) {
+    return {
+      merged: false,
+      survivorId: entityA?.id ?? entityB?.id ?? '',
+      absorbedId: '',
+      weightedRiskScore: 0,
+      confidenceA: 0,
+      confidenceB: 0,
+    };
+  }
+
+  const now = new Date();
+
+  // Compute confidence from mentionCount (more mentions → higher confidence)
+  const totalMentions = entityA.mentionCount + entityB.mentionCount;
+  const confidenceA = totalMentions > 0 ? entityA.mentionCount / totalMentions : 0.5;
+  const confidenceB = totalMentions > 0 ? entityB.mentionCount / totalMentions : 0.5;
+
+  // Determine survivor: higher confidence (mentionCount) wins
+  const survivor = confidenceA >= confidenceB ? entityA : entityB;
+  const absorbed = confidenceA >= confidenceB ? entityB : entityA;
+  const survivorConfidence = confidenceA >= confidenceB ? confidenceA : confidenceB;
+  const absorbedConfidence = confidenceA >= confidenceB ? confidenceB : confidenceA;
+
+  // Weighted average risk score
+  const weightedRiskScore = Math.round(
+    entityA.riskScore * confidenceA + entityB.riskScore * confidenceB
+  );
+
+  // Merge risk level based on weighted score
+  const newRiskLevel = weightedRiskScore >= 90 ? 'critical'
+    : weightedRiskScore >= 70 ? 'high'
+    : weightedRiskScore >= 40 ? 'medium'
+    : 'low';
+
+  // Merge platformIds
+  const survivorPlatformIds = parseJsonField<Record<string, string[]>>(survivor.platformIds, {});
+  const absorbedPlatformIds = parseJsonField<Record<string, string[]>>(absorbed.platformIds, {});
+  const mergedPlatformIds = mergePlatformIds(survivorPlatformIds, absorbedPlatformIds);
+
+  // Merge aliases — add absorbed entity's name as alias
+  const survivorAliases = parseJsonField<string[]>(survivor.aliases, []);
+  const absorbedAliases = parseJsonField<string[]>(absorbed.aliases, []);
+  const allAliases = mergeAliases(
+    mergeAliases(survivorAliases, [absorbed.name]),
+    absorbedAliases
+  );
+
+  // Merge metadata with confidence weighting (survivor's data takes precedence)
+  const survivorMeta = parseJsonField<Record<string, unknown>>(survivor.metadata, {});
+  const absorbedMeta = parseJsonField<Record<string, unknown>>(absorbed.metadata, {});
+  const mergedMeta = { ...absorbedMeta, ...survivorMeta }; // survivor overwrites
+  mergedMeta.mergedFrom = absorbed.id;
+  mergedMeta.mergedAt = now.toISOString();
+  mergedMeta.mergeConfidence = { survivor: survivorConfidence, absorbed: absorbedConfidence };
+
+  // Total mention count
+  const totalMentionCount = entityA.mentionCount + entityB.mentionCount;
+
+  // Earliest firstSeen
+  const earliestFirstSeen = entityA.firstSeen < entityB.firstSeen ? entityA.firstSeen : entityB.firstSeen;
+
+  // Update survivor entity
+  await db.entity.update({
+    where: { id: survivor.id },
+    data: {
+      aliases: JSON.stringify(allAliases),
+      platformIds: JSON.stringify(mergedPlatformIds),
+      riskScore: weightedRiskScore,
+      riskLevel: newRiskLevel,
+      mentionCount: totalMentionCount,
+      firstSeen: earliestFirstSeen,
+      metadata: JSON.stringify(mergedMeta),
+    },
+  });
+
+  // Update EntityRelations pointing to the absorbed entity
+  // Re-point relations where absorbed is the source
+  const fromRelations = await db.entityRelation.findMany({
+    where: { fromEntityId: absorbed.id },
+  });
+
+  for (const rel of fromRelations) {
+    if (rel.toEntityId === survivor.id) {
+      // Self-referential — delete
+      await db.entityRelation.delete({ where: { id: rel.id } });
+      continue;
+    }
+
+    const existing = await db.entityRelation.findFirst({
+      where: {
+        fromEntityId: survivor.id,
+        toEntityId: rel.toEntityId,
+        relationType: rel.relationType,
+      },
+    });
+
+    if (existing) {
+      const existingEvidence = parseJsonField<string[]>(existing.evidence, []);
+      const newEvidence = parseJsonField<string[]>(rel.evidence, []);
+      const mergedEvidence = [...new Set([...existingEvidence, ...newEvidence])].slice(-100);
+
+      await db.entityRelation.update({
+        where: { id: existing.id },
+        data: {
+          strength: Math.min(1.0, Math.max(existing.strength, rel.strength)),
+          evidence: JSON.stringify(mergedEvidence),
+          lastSeen: now,
+        },
+      });
+      await db.entityRelation.delete({ where: { id: rel.id } });
+    } else {
+      await db.entityRelation.update({
+        where: { id: rel.id },
+        data: { fromEntityId: survivor.id },
+      });
+    }
+  }
+
+  // Re-point relations where absorbed is the target
+  const toRelations = await db.entityRelation.findMany({
+    where: { toEntityId: absorbed.id },
+  });
+
+  for (const rel of toRelations) {
+    if (rel.fromEntityId === survivor.id) {
+      await db.entityRelation.delete({ where: { id: rel.id } });
+      continue;
+    }
+
+    const existing = await db.entityRelation.findFirst({
+      where: {
+        fromEntityId: rel.fromEntityId,
+        toEntityId: survivor.id,
+        relationType: rel.relationType,
+      },
+    });
+
+    if (existing) {
+      const existingEvidence = parseJsonField<string[]>(existing.evidence, []);
+      const newEvidence = parseJsonField<string[]>(rel.evidence, []);
+      const mergedEvidence = [...new Set([...existingEvidence, ...newEvidence])].slice(-100);
+
+      await db.entityRelation.update({
+        where: { id: existing.id },
+        data: {
+          strength: Math.min(1.0, Math.max(existing.strength, rel.strength)),
+          evidence: JSON.stringify(mergedEvidence),
+          lastSeen: now,
+        },
+      });
+      await db.entityRelation.delete({ where: { id: rel.id } });
+    } else {
+      await db.entityRelation.update({
+        where: { id: rel.id },
+        data: { toEntityId: survivor.id },
+      });
+    }
+  }
+
+  // Delete the absorbed entity
+  await db.entity.delete({ where: { id: absorbed.id } });
+
+  // Record merge event
+  const stream: EventStream = 'whatomate:intel_events';
+  await persistEvent(stream, {
+    eventType: 'analysis.correlation_found',
+    aggregateId: `merge_${Date.now()}`,
+    aggregateType: 'entity',
+    payload: {
+      action: 'entity_merge_confidence_weighted',
+      survivorId: survivor.id,
+      survivorName: survivor.name,
+      absorbedId: absorbed.id,
+      absorbedName: absorbed.name,
+      weightedRiskScore,
+      newRiskLevel,
+      confidenceA,
+      confidenceB,
+      mergedPlatformCount: Object.keys(mergedPlatformIds).length,
+    },
+    metadata: {
+      source: 'entity-resolver-merge',
+      mergeMethod: 'confidence_weighted',
+    },
+  });
+
+  return {
+    merged: true,
+    survivorId: survivor.id,
+    absorbedId: absorbed.id,
+    weightedRiskScore,
+    confidenceA,
+    confidenceB,
+  };
+}
+
 // ===== DRY RUN =====
 
 /**

@@ -43,6 +43,7 @@ async def fetch_news(client: httpx.AsyncClient) -> list[dict[str, Any]]:
             for entry in feed.entries[:10]:  # Limit to 10 per source
                 title = entry.get("title", "No title")
                 url = entry.get("link", "")
+                published = entry.get("published", entry.get("updated", ""))
 
                 results.append({
                     "title": title,
@@ -50,6 +51,8 @@ async def fetch_news(client: httpx.AsyncClient) -> list[dict[str, Any]]:
                     "url": url,
                     "lat": 0,
                     "lng": 0,
+                    "publishedAt": published,
+                    "category": entry.get("category", ""),
                 })
 
             logger.info(f"Fetched {min(len(feed.entries), 10)} articles from {source_name}")

@@ -53,10 +53,14 @@ async def fetch_earthquakes(client: httpx.AsyncClient) -> list[dict[str, Any]]:
             except (ValueError, OSError):
                 time_iso = datetime.now(tz=timezone.utc).isoformat()
 
+            # Depth is the third coordinate in GeoJSON (elevation below surface)
+            depth = coords[2] if len(coords) >= 3 else 0
+
             results.append({
                 "title": f"M{magnitude:.1f} - {props.get('place', 'Unknown')}",
                 "lat": coords[1],
                 "lng": coords[0],
+                "depth": depth,
                 "magnitude": magnitude,
                 "time": time_iso,
                 "url": props.get("url", ""),

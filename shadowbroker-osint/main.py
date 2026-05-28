@@ -425,7 +425,7 @@ def _transform_to_osint_snapshot(data: dict[str, Any]) -> dict[str, Any]:
         earthquakes.append({
             "location": eq.get("title", "Unknown"),
             "magnitude": eq.get("magnitude", 0),
-            "depth": 0,
+            "depth": eq.get("depth", 0),  # Real depth from USGS GeoJSON coords[2]
             "time": eq.get("time", ""),
             "source": "USGS",
         })
@@ -484,8 +484,8 @@ def _transform_to_osint_snapshot(data: dict[str, Any]) -> dict[str, Any]:
         gdelt.append({
             "name": g.get("name", ""),
             "url": g.get("url", ""),
-            "date": "",
-            "source": "GDELT",
+            "date": g.get("date", ""),  # Real date from GDELT seendate field
+            "source": g.get("source", "GDELT"),
         })
 
     # ── News ──
@@ -495,8 +495,8 @@ def _transform_to_osint_snapshot(data: dict[str, Any]) -> dict[str, Any]:
             "title": n.get("title", ""),
             "source": n.get("source", ""),
             "url": n.get("url", ""),
-            "publishedAt": "",
-            "category": "",
+            "publishedAt": n.get("publishedAt", ""),  # Real published date from RSS feed
+            "category": n.get("category", ""),
         })
 
     return {

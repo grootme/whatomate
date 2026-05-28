@@ -1,0 +1,26 @@
+# =============================================================================
+# Cognitive API — Docker Build
+# =============================================================================
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Install dependencies
+RUN npm install -g tsx
+
+# Copy package files
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev 2>/dev/null || npm install --production 2>/dev/null || true
+
+# Install cognitive API dependencies explicitly
+RUN npm install better-sqlite3 express cors 2>/dev/null || true
+
+# Copy cognitive API server
+COPY cognitive-api-server.ts ./
+
+# Create data directory for knowledge base
+RUN mkdir -p /root/.hermes
+
+EXPOSE 8645
+
+CMD ["npx", "tsx", "cognitive-api-server.ts"]

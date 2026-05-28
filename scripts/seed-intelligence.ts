@@ -4,12 +4,21 @@
  * Seeds: ThresholdConfig, RiskDimension, AgentState
  * Uses upsert logic so the script is idempotent — safe to run multiple times.
  *
- * Run with: npx tsx scripts/seed-intelligence.ts
+ * Flags:
+ *   --force   Delete existing data before seeding (destructive)
+ *
+ * Run with:
+ *   npx tsx scripts/seed-intelligence.ts
+ *   npx tsx scripts/seed-intelligence.ts --force
  */
 
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
+
+// Parse CLI flags
+const args = process.argv.slice(2);
+const forceMode = args.includes('--force');
 
 // ──────────────────────────────────────────────
 // 1. THRESHOLD CONFIGS
@@ -168,24 +177,33 @@ const AGENT_STATES = [
 ];
 
 // ──────────────────────────────────────────────
-// Seed functions with upsert logic
+// Force mode: delete existing data
+// ──────────────────────────────────────────────
+
+async function forceCleanAll() {
+  console.log('\n⚠️  FORCE MODE: Deleting existing data...');
+
+  await prisma.$transaction([
+    prisma.thresholdConfig.deleteMany(),
+    prisma.riskDimension.deleteMany(),
+    prisma.agentState.deleteMany(),
+  ]);
+
+  console.log('  ✅ All ThresholdConfig, RiskDimension, and AgentState records deleted');
+}
+
+// ──────────────────────────────────────────────
+// Seed functions with upsert logic (atomic via transactions)
 // ──────────────────────────────────────────────
 
 async function seedThresholds() {
-  console.log('\n📡 Seeding ThresholdConfig...');
-  let created = 0;
-  let updated = 0;
+  console.log('\n📡 Seeding ThresholdConfig (upsert on metric)...');
 
-  for (const t of THRESHOLDS) {
-    // Check by metric (unique business key)
-    const existing = await prisma.thresholdConfig.findFirst({
-      where: { metric: t.metric },
-    });
-
-    if (existing) {
-      await prisma.thresholdConfig.update({
-        where: { id: existing.id },
-        data: {
+  const result = await prisma.$transaction(
+    THRESHOLDS.map((t) =>
+      prisma.thresholdConfig.upsert({
+        where: { metric: t.metric },
+        update: {
           name: t.name,
           description: t.description,
           condition: t.condition,
@@ -197,66 +215,46 @@ async function seedThresholds() {
           enabled: t.enabled,
           metadata: t.metadata,
         },
-      });
-      updated++;
-    } else {
-      await prisma.thresholdConfig.create({
-        data: t,
-      });
-      created++;
-    }
-  }
+        create: t,
+      }),
+    ),
+  );
 
+  const created = result.filter((r) => r.createdAt.getTime() === r.updatedAt.getTime()).length;
+  const updated = result.length - created;
   console.log(`  ✅ ${THRESHOLDS.length} threshold configs: ${created} created, ${updated} updated`);
 }
 
 async function seedRiskDimensions() {
-  console.log('\n⚖️  Seeding RiskDimension...');
-  let created = 0;
-  let updated = 0;
+  console.log('\n⚖️  Seeding RiskDimension (upsert on name)...');
 
-  for (const dim of RISK_DIMENSIONS) {
-    // Use upsert on unique `name` field
-    const existing = await prisma.riskDimension.findUnique({
-      where: { name: dim.name },
-    });
-
-    if (existing) {
-      await prisma.riskDimension.update({
-        where: { id: existing.id },
-        data: {
+  const result = await prisma.$transaction(
+    RISK_DIMENSIONS.map((dim) =>
+      prisma.riskDimension.upsert({
+        where: { name: dim.name },
+        update: {
           weight: dim.weight,
           color: dim.color,
           description: dim.description,
         },
-      });
-      updated++;
-    } else {
-      await prisma.riskDimension.create({
-        data: dim,
-      });
-      created++;
-    }
-  }
+        create: dim,
+      }),
+    ),
+  );
 
+  const created = result.filter((r) => r.createdAt.getTime() === r.updatedAt.getTime()).length;
+  const updated = result.length - created;
   console.log(`  ✅ ${RISK_DIMENSIONS.length} risk dimensions: ${created} created, ${updated} updated`);
 }
 
 async function seedAgentStates() {
-  console.log('\n🤖 Seeding AgentState...');
-  let created = 0;
-  let updated = 0;
+  console.log('\n🤖 Seeding AgentState (upsert on agentId)...');
 
-  for (const a of AGENT_STATES) {
-    // Use upsert on unique `agentId` field
-    const existing = await prisma.agentState.findUnique({
-      where: { agentId: a.agentId },
-    });
-
-    if (existing) {
-      await prisma.agentState.update({
-        where: { id: existing.id },
-        data: {
+  const result = await prisma.$transaction(
+    AGENT_STATES.map((a) =>
+      prisma.agentState.upsert({
+        where: { agentId: a.agentId },
+        update: {
           name: a.name,
           layer: a.layer,
           layerName: a.layerName,
@@ -264,16 +262,13 @@ async function seedAgentStates() {
           health: a.health,
           messagesProcessed: a.messagesProcessed,
         },
-      });
-      updated++;
-    } else {
-      await prisma.agentState.create({
-        data: a,
-      });
-      created++;
-    }
-  }
+        create: a,
+      }),
+    ),
+  );
 
+  const created = result.filter((r) => r.createdAt.getTime() === r.updatedAt.getTime()).length;
+  const updated = result.length - created;
   console.log(`  ✅ ${AGENT_STATES.length} agent states: ${created} created, ${updated} updated`);
 }
 
@@ -285,11 +280,72 @@ async function main() {
   console.log('🌱 Whatomate Intelligence Database Seed');
   console.log('========================================');
   console.log(`Started at: ${new Date().toISOString()}`);
+  if (forceMode) {
+    console.log('🔓 Mode: FORCE (destructive — existing data will be deleted)');
+  } else {
+    console.log('🔒 Mode: IDEMPOTENT (upsert — safe to run multiple times)');
+  }
 
   try {
-    await seedThresholds();
-    await seedRiskDimensions();
-    await seedAgentStates();
+    // Force mode: clean slate
+    if (forceMode) {
+      await forceCleanAll();
+    }
+
+    // All seeding in a single top-level transaction for atomicity
+    await prisma.$transaction(async (tx) => {
+      // Seed thresholds using upsert on `metric` unique field
+      for (const t of THRESHOLDS) {
+        await tx.thresholdConfig.upsert({
+          where: { metric: t.metric },
+          update: {
+            name: t.name,
+            description: t.description,
+            condition: t.condition,
+            value: t.value,
+            unit: t.unit,
+            alertSeverity: t.alertSeverity,
+            alertType: t.alertType,
+            currentValue: t.currentValue,
+            enabled: t.enabled,
+            metadata: t.metadata,
+          },
+          create: t,
+        });
+      }
+      console.log('\n📡 ThresholdConfig seeded (upsert on metric)');
+
+      // Seed risk dimensions using upsert on `name` unique field
+      for (const dim of RISK_DIMENSIONS) {
+        await tx.riskDimension.upsert({
+          where: { name: dim.name },
+          update: {
+            weight: dim.weight,
+            color: dim.color,
+            description: dim.description,
+          },
+          create: dim,
+        });
+      }
+      console.log('⚖️  RiskDimension seeded (upsert on name)');
+
+      // Seed agent states using upsert on `agentId` unique field
+      for (const a of AGENT_STATES) {
+        await tx.agentState.upsert({
+          where: { agentId: a.agentId },
+          update: {
+            name: a.name,
+            layer: a.layer,
+            layerName: a.layerName,
+            status: a.status,
+            health: a.health,
+            messagesProcessed: a.messagesProcessed,
+          },
+          create: a,
+        });
+      }
+      console.log('🤖 AgentState seeded (upsert on agentId)');
+    });
 
     // Print summary
     console.log('\n========================================');

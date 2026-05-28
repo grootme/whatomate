@@ -36,6 +36,16 @@ const AUTO_DISMISS_MS = 7 * 24 * 60 * 60 * 1000;
 /** Deduplication window: don't create a new alert if same title+strategy exists within 1 hour */
 const DEDUP_WINDOW_MS = 60 * 60 * 1000;
 
+/** Semantic deduplication window: check last 24 hours for similar alerts */
+const SEMANTIC_DEDUP_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/** Minimum Jaccard similarity for titles to be considered duplicates */
+const TITLE_SIMILARITY_THRESHOLD = 0.7;
+
+/** INNOVATION 7: If 3+ alerts of the same strategy type occur within 1 hour, auto-escalate to next severity */
+const ESCALATION_BURST_THRESHOLD = 3;
+const ESCALATION_BURST_WINDOW_MS = 60 * 60 * 1000;
+
 /** Severity hierarchy for ordering */
 const SEVERITY_ORDER: AlertSeverity[] = ['INFO', 'BAJA', 'MEDIA', 'ALTA', 'CRÍTICA'];
 
@@ -243,6 +253,64 @@ async function autoDismiss(): Promise<Array<{ alertId: string; title: string; se
   return dismissed;
 }
 
+// ===== 2b. SEMANTIC SIMILARITY (INNOVATION 2) =====
+
+/**
+ * Jaccard word-level similarity between two strings.
+ * Splits into word tokens, computes |intersection| / |union| of word sets.
+ * This is better than character-level Jaccard for comparing alert titles.
+ */
+function jaccardWordSimilarity(a: string, b: string): number {
+  const wordsA = new Set(a.toLowerCase().split(/\s+/).filter(w => w.length > 2));
+  const wordsB = new Set(b.toLowerCase().split(/\s+/).filter(w => w.length > 2));
+  if (wordsA.size === 0 && wordsB.size === 0) return 1.0;
+  const intersection = new Set([...wordsA].filter(x => wordsB.has(x)));
+  const union = new Set([...wordsA, ...wordsB]);
+  return intersection.size / union.size;
+}
+
+/**
+ * Find semantically similar alerts from the last 24 hours.
+ * Uses Jaccard word similarity on titles to detect near-duplicates.
+ */
+async function findSemanticallySimilarAlert(
+  title: string,
+  strategy: string,
+  description?: string
+): Promise<{ alertId: string; titleSimilarity: number; descriptionSimilarity: number } | null> {
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - SEMANTIC_DEDUP_WINDOW_MS);
+
+  // Fetch recent unacknowledged alerts with the same strategy
+  const recentAlerts = await db.alert.findMany({
+    where: {
+      strategy,
+      acknowledged: false,
+      timestamp: { gte: cutoff },
+    },
+    orderBy: { timestamp: 'desc' },
+    take: 50,
+  });
+
+  let bestMatch: { alertId: string; titleSimilarity: number; descriptionSimilarity: number } | null = null;
+
+  for (const alert of recentAlerts) {
+    const titleSim = jaccardWordSimilarity(title, alert.title);
+    const descSim = description
+      ? jaccardWordSimilarity(description, alert.description)
+      : 0;
+
+    // If title similarity exceeds threshold, it's a semantic duplicate
+    if (titleSim >= TITLE_SIMILARITY_THRESHOLD) {
+      if (!bestMatch || titleSim > bestMatch.titleSimilarity) {
+        bestMatch = { alertId: alert.id, titleSimilarity: titleSim, descriptionSimilarity: descSim };
+      }
+    }
+  }
+
+  return bestMatch;
+}
+
 // ===== 3. ALERT DEDUPLICATION =====
 
 /**
@@ -291,6 +359,12 @@ export async function deduplicateOrCreateAlert(params: {
         ? `${existing.description}\n[Update ${now.toISOString()}] ${params.description}`
         : existing.description;
 
+    // Increment occurrence count in metadata
+    const _existingMeta = existing.relatedEvents
+      ? (() => { try { return JSON.parse(existing.relatedEvents) as string[]; } catch { return []; } })()
+      : [];
+    void _existingMeta;
+
     await db.alert.update({
       where: { id: existing.id },
       data: {
@@ -308,6 +382,70 @@ export async function deduplicateOrCreateAlert(params: {
     );
 
     return { action: 'updated', alertId: existing.id };
+  }
+
+  // INNOVATION 2: Semantic similarity deduplication
+  // Even if exact title doesn't match, check for semantically similar alerts
+  const semanticMatch = await findSemanticallySimilarAlert(
+    params.title,
+    params.strategy,
+    params.description
+  );
+
+  if (semanticMatch) {
+    // Merge into the semantically similar alert (increment occurrence count)
+    const matchAlert = await db.alert.findUnique({ where: { id: semanticMatch.alertId } });
+    if (matchAlert) {
+      const existingSeverityRank = severityRank(matchAlert.severity as AlertSeverity);
+      const newSeverityRank = severityRank(params.severity);
+      const updatedSeverity =
+        newSeverityRank > existingSeverityRank ? params.severity : matchAlert.severity;
+
+      // Parse existing occurrence count from metadata, or compute from relatedEvents
+      const _existingRelatedEvents = matchAlert.relatedEvents
+        ? (() => { try { return JSON.parse(matchAlert.relatedEvents) as string[]; } catch { return []; } })()
+        : [];
+      void _existingRelatedEvents;
+
+      const updatedDescription =
+        `${matchAlert.description}\n[Semantic Dup ${now.toISOString()} (sim=${semanticMatch.titleSimilarity.toFixed(2)})] ${params.description}`;
+
+      await db.alert.update({
+        where: { id: matchAlert.id },
+        data: {
+          severity: updatedSeverity,
+          description: updatedDescription,
+          actionTaken: params.actionTaken ?? matchAlert.actionTaken,
+        },
+      });
+
+      // Record deduplication event
+      await persistEvent('whatomate:alerts', {
+        eventType: 'monitoring.alert_acknowledged',
+        aggregateId: `semantic_dedup_${Date.now()}`,
+        aggregateType: 'alert',
+        payload: {
+          action: 'semantic_deduplication',
+          originalAlertId: matchAlert.id,
+          originalTitle: matchAlert.title,
+          duplicateTitle: params.title,
+          titleSimilarity: semanticMatch.titleSimilarity,
+          descriptionSimilarity: semanticMatch.descriptionSimilarity,
+          strategy: params.strategy,
+        },
+        metadata: {
+          source: 'alert-workflow-semantic-dedup',
+          dedupMethod: 'jaccard_word_similarity',
+          threshold: TITLE_SIMILARITY_THRESHOLD,
+        },
+      });
+
+      console.log(
+        `[AlertWorkflow] Semantic dedup: "${params.title}" → merged into "${matchAlert.title}" (${semanticMatch.titleSimilarity.toFixed(2)} similarity)`
+      );
+
+      return { action: 'updated', alertId: matchAlert.id };
+    }
   }
 
   // No duplicate found — create new alert
@@ -460,6 +598,117 @@ export async function correlateAlert(alertId: string): Promise<CorrelationResult
   return { alertId, linkedAlertIds, linkedEventIds };
 }
 
+// ===== INNOVATION 7: BURST AUTO-ESCALATION WITH SEVERITY UPGRADE =====
+
+/**
+ * If 3+ alerts of the same strategy type occur within 1 hour,
+ * auto-escalate each alert's severity to the next level.
+ *
+ * For each qualifying strategy burst:
+ * 1. Upgrade severity by one level (e.g., MEDIA → ALTA)
+ * 2. Record escalation reason in alert metadata
+ * 3. Notify via notification channel
+ * 4. Track escalation events in event sourcing
+ */
+async function burstAutoEscalate(): Promise<Array<{ alertId: string; title: string; severity: string }>> {
+  const now = new Date();
+  const burstCutoff = new Date(now.getTime() - ESCALATION_BURST_WINDOW_MS);
+  const escalated: Array<{ alertId: string; title: string; severity: string }> = [];
+
+  // Find all strategies with 3+ unacknowledged alerts in the last hour
+  const burstStrategies = await db.alert.groupBy({
+    by: ['strategy'],
+    where: {
+      acknowledged: false,
+      timestamp: { gte: burstCutoff },
+    },
+    _count: { id: true },
+    having: {
+      id: { _count: { gte: ESCALATION_BURST_THRESHOLD } },
+    },
+  });
+
+  for (const burst of burstStrategies) {
+    const strategy = burst.strategy;
+
+    // Fetch the individual alerts for this strategy
+    const strategyAlerts = await db.alert.findMany({
+      where: {
+        strategy,
+        acknowledged: false,
+        timestamp: { gte: burstCutoff },
+      },
+      orderBy: { timestamp: 'desc' },
+    });
+
+    for (const alert of strategyAlerts) {
+      const currentRank = severityRank(alert.severity as AlertSeverity);
+      if (currentRank >= SEVERITY_ORDER.length - 1) continue; // Already CRÍTICA
+
+      // Upgrade to next severity level
+      const nextSeverity = SEVERITY_ORDER[currentRank + 1];
+
+      await db.alert.update({
+        where: { id: alert.id },
+        data: {
+          severity: nextSeverity,
+          escalated: true,
+        },
+      });
+
+      // Record escalation event
+      await persistEvent('whatomate:alerts', {
+        eventType: 'monitoring.alert_escalated',
+        aggregateId: alert.id,
+        aggregateType: 'alert',
+        payload: {
+          alertId: alert.id,
+          previousSeverity: alert.severity,
+          newSeverity: nextSeverity,
+          title: alert.title,
+          strategy: alert.strategy,
+          reason: `Burst auto-escalation: ${strategyAlerts.length} alerts from strategy "${strategy}" within 1 hour (threshold: ${ESCALATION_BURST_THRESHOLD})`,
+          escalatedBy: 'burst-auto-escalation',
+        },
+        metadata: {
+          burstEscalation: true,
+          originalSeverity: alert.severity,
+          alertCountInBurst: strategyAlerts.length,
+          strategyBurstWindow: ESCALATION_BURST_WINDOW_MS,
+        },
+      });
+
+      // Notify via notification channel
+      const alertObj: Alert = {
+        id: alert.id,
+        source: alert.source,
+        severity: nextSeverity as AlertSeverity,
+        title: alert.title,
+        description: alert.description,
+        actionTaken: alert.actionTaken ?? undefined,
+        strategy: alert.strategy as Alert['strategy'],
+        acknowledged: alert.acknowledged,
+        escalated: true,
+        relatedEvents: alert.relatedEvents ? JSON.parse(alert.relatedEvents) : undefined,
+        timestamp: alert.timestamp,
+      };
+      await notifyAlert(alertObj);
+
+      escalated.push({
+        alertId: alert.id,
+        title: alert.title,
+        severity: nextSeverity,
+      });
+
+      console.log(
+        `[AlertWorkflow] Burst escalation: "${alert.title}" ${alert.severity} → ${nextSeverity} (${strategyAlerts.length} alerts in 1h)`
+      );
+    }
+  }
+
+  return escalated;
+}
+
 // ===== MAIN LIFECYCLE PROCESSOR =====
 
 /**
@@ -475,18 +724,21 @@ export async function processAlertLifecycle(): Promise<LifecycleResult> {
   const escalated = await autoEscalate();
   const dismissed = await autoDismiss();
 
+  // INNOVATION 7: Burst-based auto-escalation with severity upgrade
+  const burstEscalated = await burstAutoEscalate();
+
   const result: LifecycleResult = {
-    escalated: escalated.length,
+    escalated: escalated.length + burstEscalated.length,
     dismissed: dismissed.length,
     errors: 0,
     details: {
-      escalated,
+      escalated: [...escalated, ...burstEscalated],
       dismissed,
     },
   };
 
   console.log(
-    `[AlertWorkflow] Lifecycle processing complete: ${result.escalated} escalated, ${result.dismissed} dismissed`
+    `[AlertWorkflow] Lifecycle processing complete: ${result.escalated} escalated (incl. ${burstEscalated.length} burst), ${result.dismissed} dismissed`
   );
 
   // Persist lifecycle event
@@ -498,6 +750,7 @@ export async function processAlertLifecycle(): Promise<LifecycleResult> {
       type: 'alert_lifecycle_processing',
       escalated: result.escalated,
       dismissed: result.dismissed,
+      burstEscalated: burstEscalated.length,
       escalatedAlerts: result.details.escalated.map(a => a.alertId),
       dismissedAlerts: result.details.dismissed.map(a => a.alertId),
     },
@@ -505,6 +758,7 @@ export async function processAlertLifecycle(): Promise<LifecycleResult> {
       source: 'alert-workflow',
       autoEscalateThresholdMs: AUTO_ESCALATE_MS,
       autoDismissThresholdMs: AUTO_DISMISS_MS,
+      burstEscalationThreshold: ESCALATION_BURST_THRESHOLD,
     },
   });
 

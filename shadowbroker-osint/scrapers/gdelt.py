@@ -81,12 +81,16 @@ async def fetch_gdelt(client: httpx.AsyncClient) -> list[dict[str, Any]]:
         for article in articles:
             title = article.get("title", "Unknown Event")
             url = article.get("url", "")
+            seendate = article.get("seendate", "")
+            source = article.get("source", "")
 
             results.append({
                 "name": title,
                 "lat": 0,
                 "lng": 0,
                 "url": url,
+                "date": seendate,
+                "source": source or "GDELT",
             })
 
         logger.info(f"Fetched {len(results)} GDELT events")

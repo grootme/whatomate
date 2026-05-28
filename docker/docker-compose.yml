@@ -1,32 +1,119 @@
+# =============================================================================
+# Whatomate Intelligence Platform — Complete Docker Compose
+# =============================================================================
+# All services: whatomate-app, dashboard, frontend, postgres, redis,
+#               osint, telethon, hermes, cognitive
+#
+# Networks:
+#   frontend — services exposed to users (frontend, dashboard)
+#   backend  — internal service-to-service communication
+#
+# Usage:
+#   docker compose up -d
+#   docker compose up -d --build            # rebuild images
+#   docker compose logs -f <service>        # follow logs
+# =============================================================================
+
 services:
-  # Whatomate app
-  app:
+  # ─── Whatomate Go Backend ──────────────────────────────────────────────────
+  whatomate-app:
     image: registry.xetid.cu/proxy.docker.io/shridh0r/whatomate:latest
     container_name: whatomate_app
     restart: unless-stopped
     ports:
-      - "8081:8080"
+      - "8080:8080"
     networks:
-      - whatomate
+      - frontend
+      - backend
     depends_on:
-      db:
+      postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: ${POSTGRES_USER:-whatomate}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-whatomate}
+      DB_NAME: ${POSTGRES_DB:-whatomate}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production-32chars!!}
     volumes:
-      - ./uploads:/app/uploads:rw
+      - app-uploads:/app/uploads:rw
       - ./config.toml:/app/config.toml:ro
     command: ["server", "-migrate", "-config", "/app/config.toml"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
-  # PostgreSQL database
-  db:
+  # ─── Next.js Intelligence Dashboard ────────────────────────────────────────
+  dashboard:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.dashboard
+    container_name: whatomate_dashboard
+    restart: unless-stopped
+    ports:
+      - "3002:3000"
+    networks:
+      - frontend
+      - backend
+    depends_on:
+      whatomate-app:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      DATABASE_URL: ${DASHBOARD_DATABASE_URL:-file:../data/dashboard.db}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://whatomate-app:8080}
+      INTELLIGENCE_API_KEY: ${INTELLIGENCE_API_KEY:-}
+    volumes:
+      - dashboard-data:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  # ─── Vue.js Frontend ──────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: whatomate_frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    networks:
+      - frontend
+    depends_on:
+      whatomate-app:
+        condition: service_healthy
+    environment:
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:8080}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:80/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  # ─── PostgreSQL ───────────────────────────────────────────────────────────
+  postgres:
     image: registry.xetid.cu/proxy.docker.io/library/postgres:17-alpine
     container_name: whatomate_db
     restart: unless-stopped
     networks:
-      - whatomate
+      - backend
     ports:
-      - "127.0.0.1:5433:5432"
+      - "5432:5432"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-whatomate}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-whatomate}
@@ -39,15 +126,15 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
-  # Redis
+  # ─── Redis ────────────────────────────────────────────────────────────────
   redis:
     image: registry.xetid.cu/proxy.docker.io/library/redis:7-alpine
     container_name: whatomate_redis
     restart: unless-stopped
     networks:
-      - whatomate
+      - backend
     ports:
-      - "127.0.0.1:6380:6379"
+      - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -56,9 +143,151 @@ services:
     volumes:
       - redis-data:/data
 
-networks:
-  whatomate:
+  # ─── OSINT Shadowbroker (Python) ─────────────────────────────────────────
+  osint:
+    build:
+      context: ../shadowbroker-osint
+      dockerfile: Dockerfile
+    container_name: whatomate_osint
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    networks:
+      - backend
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      OSINT_PORT: ${OSINT_PORT:-8000}
+    volumes:
+      - osint-data:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
 
+  # ─── Telethon (Python) ───────────────────────────────────────────────────
+  telethon:
+    build:
+      context: ../telethon-service
+      dockerfile: Dockerfile
+    container_name: whatomate_telethon
+    restart: unless-stopped
+    ports:
+      - "8700:8700"
+    networks:
+      - backend
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      TELETHON_PORT: ${TELETHON_PORT:-8700}
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID:-}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH:-}
+      TELEGRAM_PHONE: ${TELEGRAM_PHONE:-}
+    volumes:
+      - telethon-sessions:/app/sessions
+      - telethon-data:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8700/health')\" || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  # ─── Hermes Agent (TypeScript) ───────────────────────────────────────────
+  hermes:
+    build:
+      context: ../hermes-agent
+      dockerfile: Dockerfile
+    container_name: whatomate_hermes
+    restart: unless-stopped
+    ports:
+      - "8642:8642"
+    networks:
+      - frontend
+      - backend
+    depends_on:
+      redis:
+        condition: service_healthy
+      whatomate-app:
+        condition: service_healthy
+    environment:
+      HERMES_PORT: ${HERMES_PORT:-8642}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      BACKEND_URL: http://whatomate-app:8080
+    volumes:
+      - hermes-data:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8642/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  # ─── Cognitive API (TypeScript) ──────────────────────────────────────────
+  cognitive:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile.cognitive
+    container_name: whatomate_cognitive
+    restart: unless-stopped
+    ports:
+      - "8645:8645"
+    networks:
+      - backend
+    depends_on:
+      hermes:
+        condition: service_healthy
+    environment:
+      COGNITIVE_API_PORT: ${COGNITIVE_API_PORT:-8645}
+    volumes:
+      - cognitive-data:/root/.hermes
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8645/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Networks
+# ═══════════════════════════════════════════════════════════════════════════════
+networks:
+  frontend:
+    name: whatomate_frontend
+    driver: bridge
+  backend:
+    name: whatomate_backend
+    driver: bridge
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Volumes — data persistence
+# ═══════════════════════════════════════════════════════════════════════════════
 volumes:
   postgres-data:
+    name: whatomate_postgres_data
   redis-data:
+    name: whatomate_redis_data
+  app-uploads:
+    name: whatomate_uploads
+  dashboard-data:
+    name: whatomate_dashboard_data
+  osint-data:
+    name: whatomate_osint_data
+  telethon-sessions:
+    name: whatomate_telethon_sessions
+  telethon-data:
+    name: whatomate_telethon_data
+  hermes-data:
+    name: whatomate_hermes_data
+  cognitive-data:
+    name: whatomate_cognitive_data

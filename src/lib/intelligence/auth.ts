@@ -8,18 +8,34 @@ import { NextResponse } from 'next/server';
  *   2. `Authorization: Bearer <key>` header
  *   3. `apikey` query parameter
  *
- * If `INTELLIGENCE_API_KEY` is not set in the environment the request is
- * always allowed (dev mode).
+ * Security modes:
+ *   - If `INTELLIGENCE_API_KEY` is set: all requests must provide a valid key.
+ *   - If `INTELLIGENCE_API_KEY` is NOT set but `INTELLIGENCE_STRICT_AUTH=true`:
+ *     all requests are REJECTED (production-safe default).
+ *   - If neither is set: dev mode allows all requests with a warning log.
  */
 export function validateApiKey(request: Request): {
   valid: boolean;
   keyName?: string;
 } {
   const expectedKey = process.env.INTELLIGENCE_API_KEY;
+  const strictMode = process.env.INTELLIGENCE_STRICT_AUTH === 'true';
 
-  // Dev mode – no key configured, allow all requests
+  // Strict mode without API key configured: reject all requests
+  if (!expectedKey && strictMode) {
+    console.warn('[AUTH] INTELLIGENCE_STRICT_AUTH=true but no INTELLIGENCE_API_KEY set. Rejecting request.');
+    return { valid: false };
+  }
+
+  // Dev mode – no key configured, allow all requests (with warning)
   if (!expectedKey) {
-    return { valid: true, keyName: 'intelligence-api' };
+    const url = new URL(request.url);
+    console.warn(
+      `[AUTH] WARNING: No INTELLIGENCE_API_KEY configured. All API requests are UNAUTHENTICATED. ` +
+      `Set INTELLIGENCE_API_KEY or INTELLIGENCE_STRICT_AUTH=true to secure this endpoint. ` +
+      `Path: ${url.pathname}`
+    );
+    return { valid: true, keyName: 'intelligence-api-dev' };
   }
 
   // 1. x-api-key header

@@ -53,7 +53,7 @@ export interface TaskResult {
 
 // ===== Internal task store =====
 
-const BASE_URL = 'http://localhost:3000';
+const BASE_URL = process.env.INTELLIGENCE_BASE_URL || 'http://localhost:3000';
 
 /**
  * Creates the initial `nextRun` timestamp aligned to the current time.
@@ -164,71 +164,58 @@ async function correlationHandler(): Promise<{ success: boolean; result?: unknow
 }
 
 /**
- * Adaptive Metrics — records system-wide adaptive metrics and adjusts thresholds.
- * Calls POST /api/scheduler internally (triggers only the adaptive part).
+ * Adaptive Metrics — delegates to the granular adaptive strategy from the Strategy Registry.
+ *
+ * Previously this handler used a flat ±10% adjustment for all thresholds, which was
+ * inconsistent with the registry's per-threshold FPR-based granular approach.
+ * Now it delegates to `strategyRegistry.evaluateWith('adaptive', ctx)` which provides:
+ *   - Per-threshold FPR analysis (independent evaluation)
+ *   - Adaptive adjustment % scaled by FPR (min 5%, max 15%)
+ *   - Threshold-specific bounds from metadata
+ *   - Cooldown period (1 hour) to prevent oscillation
+ *   - Detailed audit trail for every adjustment
  */
 async function adaptiveMetricsHandler(): Promise<{ success: boolean; result?: unknown; error?: string }> {
   try {
-    // Run adaptive metrics calculation directly (same logic as scheduler's TASK 4)
+    const { strategyRegistry } = await import('./strategies');
     const now = new Date();
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
-    const recentAlerts = await db.alert.findMany({ where: { timestamp: { gte: thirtyDaysAgo } } });
-    const totalAlerts = recentAlerts.length;
-    const acknowledged = recentAlerts.filter(a => a.acknowledged).length;
-    const escalated = recentAlerts.filter(a => a.escalated).length;
-    const possibleFalsePositives = totalAlerts - acknowledged - escalated;
-    const falsePositiveRate = totalAlerts > 0 ? Math.max(0, possibleFalsePositives / totalAlerts * 100) : 0;
-    const sensitivity = Math.min(100, (totalAlerts > 0 ? acknowledged / totalAlerts : 0) * 100 + (totalAlerts > 0 ? escalated / totalAlerts : 0) * 50);
-    const accuracy = Math.min(100, (1 - falsePositiveRate / 100) * 100);
+    // Build context from DB for the adaptive strategy
+    const [thresholds, recentAlerts, entities, patterns, messages] = await Promise.all([
+      db.thresholdConfig.findMany({ where: { enabled: true } }),
+      db.alert.findMany({ where: { timestamp: { gte: thirtyDaysAgo } } }),
+      db.entity.findMany({ where: { lastSeen: { gte: thirtyDaysAgo } }, take: 100 }),
+      db.patternDetection.findMany({ where: { status: { in: ['active', 'confirmed', 'investigating'] } }, take: 50 }),
+      db.rawMessage.findMany({ where: { timestamp: { gte: thirtyDaysAgo } }, take: 200, orderBy: { timestamp: 'desc' } }),
+    ]);
 
-    await db.adaptiveMetric.create({
-      data: {
-        date: now,
-        falsePositiveRate,
-        sensitivity,
-        accuracy,
-        threshold: 'system',
-        adjustment: JSON.stringify({
-          totalAlerts,
-          acknowledged,
-          escalated,
-          action: falsePositiveRate > 15
-            ? 'increase_thresholds'
-            : falsePositiveRate < 5
-              ? 'decrease_thresholds'
-              : 'maintain',
-          triggeredBy: 'adaptive_scheduler',
-        }),
-      },
-    });
+    // Map ThresholdConfig to include metadata for the strategy
+    const mappedThresholds = thresholds.map(t => ({
+      ...t,
+      metadata: t.metadata ? (() => { try { return JSON.parse(t.metadata); } catch { return {}; } })() : {},
+      currentAlertCount: recentAlerts.filter(a => a.thresholdId === t.id).length,
+    }));
 
-    // Adaptive threshold adjustment
-    const adjustments: string[] = [];
-    if (falsePositiveRate > 15) {
-      const thresholds = await db.thresholdConfig.findMany({ where: { enabled: true } });
-      for (const threshold of thresholds) {
-        const newValue = Math.round(threshold.value * 1.1);
-        await db.thresholdConfig.update({ where: { id: threshold.id }, data: { value: newValue } });
-        adjustments.push(`${threshold.name}: ${threshold.value} → ${newValue} (+10%)`);
-      }
-    } else if (falsePositiveRate < 5 && sensitivity < 80) {
-      const thresholds = await db.thresholdConfig.findMany({ where: { enabled: true } });
-      for (const threshold of thresholds) {
-        const newValue = Math.round(threshold.value * 0.9);
-        await db.thresholdConfig.update({ where: { id: threshold.id }, data: { value: newValue } });
-        adjustments.push(`${threshold.name}: ${threshold.value} → ${newValue} (-10%)`);
-      }
-    }
+    const ctx = {
+      thresholds: mappedThresholds,
+      entities,
+      patterns,
+      messages,
+      alerts: recentAlerts,
+      osintData: null,
+      recentAlerts,
+    };
+
+    const result = await strategyRegistry.evaluateWith('adaptive', ctx as any);
 
     return {
       success: true,
       result: {
-        falsePositiveRate,
-        sensitivity,
-        accuracy,
-        totalAlerts,
-        adjustments,
+        action: result.action,
+        confidence: result.confidence,
+        reasoning: result.reasoning,
+        data: result.data,
       },
     };
   } catch (err) {
