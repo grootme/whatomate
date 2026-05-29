@@ -16,6 +16,7 @@ import { CognitiveView } from '@/components/whatomate/cognitive-view';
 import { ResearchView } from '@/components/whatomate/research-view';
 import { HermesView } from '@/components/whatomate/hermes-view';
 import { MultiagentView } from '@/components/whatomate/multiagent-view';
+import { MissionsView } from '@/components/whatomate/missions-view';
 import { StrategiesView } from '@/components/whatomate/strategies-view';
 import { MonitoringView } from '@/components/whatomate/monitoring-view';
 import { ReportsView } from '@/components/whatomate/reports-view';
@@ -81,6 +82,8 @@ export default function Home() {
         return <HermesView />;
       case 'multiagent':
         return <MultiagentView />;
+      case 'missions':
+        return <MissionsView />;
       case 'strategies':
         return <StrategiesView />;
       case 'monitoring':

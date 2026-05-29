@@ -19,6 +19,7 @@ import {
   GitBranch,
   Activity,
   FileOutput,
+  Crosshair,
   X,
 } from 'lucide-react';
 
@@ -38,6 +39,7 @@ const iconMap: Record<string, React.ElementType> = {
   GitBranch,
   Activity,
   FileOutput,
+  Crosshair,
 };
 
 interface SidebarProps {
@@ -49,8 +51,8 @@ interface SidebarProps {
 
 export function Sidebar({ activeView, onViewChange, isOpen, onClose }: SidebarProps) {
   // Group nav items: main, OSINT, settings
-  const mainItems = navItems.filter((i) => !['multiagent', 'strategies', 'monitoring', 'reports', 'settings'].includes(i.id));
-  const osintItems = navItems.filter((i) => ['multiagent', 'strategies', 'monitoring', 'reports'].includes(i.id));
+  const mainItems = navItems.filter((i) => !['multiagent', 'missions', 'strategies', 'monitoring', 'reports', 'settings'].includes(i.id));
+  const osintItems = navItems.filter((i) => ['multiagent', 'missions', 'strategies', 'monitoring', 'reports'].includes(i.id));
   const settingsItems = navItems.filter((i) => i.id === 'settings');
 
   return (

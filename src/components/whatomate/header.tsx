@@ -41,6 +41,7 @@ const viewTitles: Record<string, string> = {
   research: 'DeerFlow Research',
   hermes: 'Hermes Gateway',
   multiagent: 'Multi-Agente OSINT',
+  missions: 'Misiones Especializadas',
   strategies: 'Estrategias de Decisión',
   monitoring: 'Monitoreo en Tiempo Real',
   reports: 'Centro de Reportes',

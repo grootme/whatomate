@@ -208,6 +208,23 @@ export function useIntelligenceData() {
     }
   }, [store]);
 
+  const fetchMissions = useCallback(async () => {
+    try {
+      const res = await fetch('/api/missions');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.missions) {
+          store.setMissions(data.missions);
+        }
+        if (data.correlations) {
+          store.setCrossMissionCorrelations(data.correlations);
+        }
+      }
+    } catch {
+      /* service unavailable */
+    }
+  }, [store]);
+
   // Initial hydration
   useEffect(() => {
     if (initialized.current) return;
@@ -221,8 +238,9 @@ export function useIntelligenceData() {
       fetchEvents(),
       fetchOsint(),
       fetchSignals(),
+      fetchMissions(),
     ]);
-  }, [fetchAgents, fetchAlerts, fetchStrategies, fetchReports, fetchEvents, fetchOsint, fetchSignals]);
+  }, [fetchAgents, fetchAlerts, fetchStrategies, fetchReports, fetchEvents, fetchOsint, fetchSignals, fetchMissions]);
 
   // Auto-refresh every 30 seconds
   useEffect(() => {
@@ -233,9 +251,10 @@ export function useIntelligenceData() {
       fetchEvents();
       fetchOsint();
       fetchSignals();
+      fetchMissions();
     }, 30000);
     return () => clearInterval(interval);
-  }, [fetchAgents, fetchAlerts, fetchStrategies, fetchEvents, fetchOsint, fetchSignals]);
+  }, [fetchAgents, fetchAlerts, fetchStrategies, fetchEvents, fetchOsint, fetchSignals, fetchMissions]);
 
   return {
     refresh: useCallback(() => {
@@ -246,7 +265,8 @@ export function useIntelligenceData() {
       fetchEvents();
       fetchOsint();
       fetchSignals();
-    }, [fetchAgents, fetchAlerts, fetchStrategies, fetchReports, fetchEvents, fetchOsint, fetchSignals]),
+      fetchMissions();
+    }, [fetchAgents, fetchAlerts, fetchStrategies, fetchReports, fetchEvents, fetchOsint, fetchSignals, fetchMissions]),
   };
 }
 

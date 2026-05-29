@@ -12,6 +12,7 @@ import type {
   AdaptiveMetric,
   Agent,
 } from '@/lib/intelligence/types';
+import type { MissionGroup, CrossMissionCorrelation } from '@/lib/intelligence/missions';
 
 export interface AgentLayer {
   id: number;
@@ -128,6 +129,12 @@ interface WhatomateStore {
   setThreatLevel: (level: number) => void;
   totalMessagesProcessed: number;
   incrementMessages: (count: number) => void;
+
+  // Missions — specialized agent groups
+  missions: MissionGroup[];
+  setMissions: (missions: MissionGroup[]) => void;
+  crossMissionCorrelations: CrossMissionCorrelation[];
+  setCrossMissionCorrelations: (correlations: CrossMissionCorrelation[]) => void;
 }
 
 export const useWhatomateStore = create<WhatomateStore>((set) => ({
@@ -257,4 +264,10 @@ export const useWhatomateStore = create<WhatomateStore>((set) => ({
     set((state) => ({
       totalMessagesProcessed: state.totalMessagesProcessed + count,
     })),
+
+  // Missions
+  missions: [],
+  setMissions: (missions) => set({ missions }),
+  crossMissionCorrelations: [],
+  setCrossMissionCorrelations: (correlations) => set({ crossMissionCorrelations: correlations }),
 }));
