@@ -604,14 +604,28 @@ export function MissionsView() {
       const res = await fetch('/api/missions');
       if (res.ok) {
         const data = await res.json();
-        setMissions(data.missions ?? []);
-        setCorrelations(data.correlations ?? []);
+        setMissions(Array.isArray(data.missions) ? data.missions : []);
+        setCorrelations(Array.isArray(data.correlations) ? data.correlations : []);
         setServices(data.services ?? {});
       }
     } catch {
       /* service unavailable */
     } finally {
       setLoading(false);
+    }
+
+    // Also try the intelligence engine for mission/DNA enrichment (defensive merge)
+    try {
+      const ieRes = await fetch('/api/intelligence');
+      if (ieRes.ok) {
+        const ieData = await ieRes.json();
+        // Enrich service status from intelligence engine
+        if (ieData.services && typeof ieData.services === 'object') {
+          setServices(prev => ({ ...prev, ...ieData.services }));
+        }
+      }
+    } catch {
+      /* intelligence engine unavailable */
     }
   }, []);
 

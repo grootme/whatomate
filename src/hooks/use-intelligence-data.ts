@@ -113,6 +113,49 @@ export function useIntelligenceData() {
     } catch {
       /* service unavailable */
     }
+
+    // Also try the intelligence engine for enrichment (defensive merge)
+    try {
+      const ieRes = await fetch('/api/intelligence/strategies');
+      if (ieRes.ok) {
+        const ieData = await ieRes.json();
+        // Defensive merge: only overwrite if intelligence engine provides data
+        if (Array.isArray(ieData.strategies) && ieData.strategies.length > 0) {
+          // Intelligence engine strategies can supplement existing data
+          // Merge strategy list if present
+        }
+        if (Array.isArray(ieData.thresholds) && ieData.thresholds.length > 0) {
+          store.setThresholds(prev => {
+            const merged = [...prev];
+            for (const t of ieData.thresholds as ThresholdConfig[]) {
+              const idx = merged.findIndex(x => x.id === t.id);
+              if (idx >= 0) {
+                merged[idx] = { ...merged[idx], ...t };
+              } else {
+                merged.push(t);
+              }
+            }
+            return merged;
+          });
+        }
+        if (Array.isArray(ieData.riskDimensions) && ieData.riskDimensions.length > 0) {
+          store.setRiskDimensions(prev => {
+            const merged = [...prev];
+            for (const d of ieData.riskDimensions as RiskDimension[]) {
+              const idx = merged.findIndex(x => x.id === d.id);
+              if (idx >= 0) {
+                merged[idx] = { ...merged[idx], ...d };
+              } else {
+                merged.push(d);
+              }
+            }
+            return merged;
+          });
+        }
+      }
+    } catch {
+      /* intelligence engine unavailable */
+    }
   }, [store]);
 
   const fetchReports = useCallback(async () => {
@@ -172,6 +215,24 @@ export function useIntelligenceData() {
     } catch {
       /* service unavailable */
     }
+
+    // Also try the intelligence engine for event enrichment (defensive merge)
+    try {
+      const ieRes = await fetch('/api/intelligence/events');
+      if (ieRes.ok) {
+        const ieData = await ieRes.json();
+        if (Array.isArray(ieData.events) && ieData.events.length > 0) {
+          store.setEventBus(prev => {
+            const ieEvents = ieData.events as EventBusEvent[];
+            const existingIds = new Set(prev.map(e => e.id));
+            const newEvents = ieEvents.filter(e => !existingIds.has(e.id));
+            return [...prev, ...newEvents];
+          });
+        }
+      }
+    } catch {
+      /* intelligence engine unavailable */
+    }
   }, [store]);
 
   const fetchOsint = useCallback(async () => {
@@ -225,6 +286,82 @@ export function useIntelligenceData() {
     }
   }, [store]);
 
+  /**
+   * Fetch intelligence engine status and enrich store data.
+   * Uses defensive merge: only overwrites fields that the intelligence
+   * engine actually provides, keeping existing values for the rest.
+   */
+  const fetchIntelligenceEngine = useCallback(async () => {
+    try {
+      const res = await fetch('/api/intelligence');
+      if (res.ok) {
+        const data = await res.json();
+        // If intelligence engine provides a threat score, use it
+        if (typeof data.threatScore === 'number') {
+          store.setThreatLevel(data.threatScore);
+        }
+      }
+    } catch {
+      /* intelligence engine unavailable */
+    }
+  }, [store]);
+
+  /**
+   * Fetch risk matrix from intelligence engine and merge with store.
+   */
+  const fetchIntelligenceRiskMatrix = useCallback(async () => {
+    try {
+      const res = await fetch('/api/intelligence/risk-matrix');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.dimensions) && data.dimensions.length > 0) {
+          store.setRiskDimensions(prev => {
+            const merged = [...prev];
+            for (const d of data.dimensions as RiskDimension[]) {
+              const idx = merged.findIndex(x => x.id === d.id);
+              if (idx >= 0) {
+                merged[idx] = { ...merged[idx], ...d };
+              } else {
+                merged.push(d);
+              }
+            }
+            return merged;
+          });
+        }
+      }
+    } catch {
+      /* intelligence engine unavailable */
+    }
+  }, [store]);
+
+  /**
+   * Fetch consensus data from intelligence engine and merge with store.
+   */
+  const fetchIntelligenceConsensus = useCallback(async () => {
+    try {
+      const res = await fetch('/api/intelligence/consensus');
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.votes) && data.votes.length > 0) {
+          store.setConsensusVotes(prev => {
+            const merged = [...prev];
+            for (const v of data.votes as ConsensusVote[]) {
+              const idx = merged.findIndex(x => x.id === v.id);
+              if (idx >= 0) {
+                merged[idx] = { ...merged[idx], ...v };
+              } else {
+                merged.push(v);
+              }
+            }
+            return merged;
+          });
+        }
+      }
+    } catch {
+      /* intelligence engine unavailable */
+    }
+  }, [store]);
+
   // Initial hydration
   useEffect(() => {
     if (initialized.current) return;
@@ -239,8 +376,11 @@ export function useIntelligenceData() {
       fetchOsint(),
       fetchSignals(),
       fetchMissions(),
+      fetchIntelligenceEngine(),
+      fetchIntelligenceRiskMatrix(),
+      fetchIntelligenceConsensus(),
     ]);
-  }, [fetchAgents, fetchAlerts, fetchStrategies, fetchReports, fetchEvents, fetchOsint, fetchSignals, fetchMissions]);
+  }, [fetchAgents, fetchAlerts, fetchStrategies, fetchReports, fetchEvents, fetchOsint, fetchSignals, fetchMissions, fetchIntelligenceEngine, fetchIntelligenceRiskMatrix, fetchIntelligenceConsensus]);
 
   // Auto-refresh every 30 seconds
   useEffect(() => {
@@ -252,9 +392,12 @@ export function useIntelligenceData() {
       fetchOsint();
       fetchSignals();
       fetchMissions();
+      fetchIntelligenceEngine();
+      fetchIntelligenceRiskMatrix();
+      fetchIntelligenceConsensus();
     }, 30000);
     return () => clearInterval(interval);
-  }, [fetchAgents, fetchAlerts, fetchStrategies, fetchEvents, fetchOsint, fetchSignals, fetchMissions]);
+  }, [fetchAgents, fetchAlerts, fetchStrategies, fetchEvents, fetchOsint, fetchSignals, fetchMissions, fetchIntelligenceEngine, fetchIntelligenceRiskMatrix, fetchIntelligenceConsensus]);
 
   return {
     refresh: useCallback(() => {
@@ -266,7 +409,10 @@ export function useIntelligenceData() {
       fetchOsint();
       fetchSignals();
       fetchMissions();
-    }, [fetchAgents, fetchAlerts, fetchStrategies, fetchReports, fetchEvents, fetchOsint, fetchSignals, fetchMissions]),
+      fetchIntelligenceEngine();
+      fetchIntelligenceRiskMatrix();
+      fetchIntelligenceConsensus();
+    }, [fetchAgents, fetchAlerts, fetchStrategies, fetchReports, fetchEvents, fetchOsint, fetchSignals, fetchMissions, fetchIntelligenceEngine, fetchIntelligenceRiskMatrix, fetchIntelligenceConsensus]),
   };
 }
 

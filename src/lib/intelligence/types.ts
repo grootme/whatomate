@@ -364,4 +364,11 @@ export const SERVICE_ENDPOINTS = {
     basePath: '/api/intel',
     direct: true as const,
   },
+  intelligenceEngine: {
+    host: process.env.INTELLIGENCE_ENGINE_HOST || 'localhost',
+    port: parseInt(process.env.INTELLIGENCE_ENGINE_PORT || '8900'),
+    protocol: process.env.INTELLIGENCE_ENGINE_PROTOCOL || 'http',
+    basePath: '/api/v1',
+    direct: true as const,
+  },
 } as const;
