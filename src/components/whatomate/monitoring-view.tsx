@@ -9,7 +9,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import { useWhatomateStore } from '@/lib/store';
-import { useIntelligenceData, formatTimestamp } from '@/hooks/use-intelligence-data';
+import { useIntelligenceData } from '@/hooks/use-intelligence-data';
+import { SEVERITY, type SeverityLevel, scoreToRiskLevel, RISK_LEVELS } from '@/lib/registries';
+import { formatTimestamp } from '@/lib/formatters';
 import {
   ChartContainer,
   ChartTooltip,
@@ -37,21 +39,16 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-const severityConfig: Record<string, { color: string; bg: string; border: string; icon: React.ElementType }> = {
-  'CRÍTICA': { color: 'text-red-700 dark:text-red-400', bg: 'bg-red-50 dark:bg-red-950/30', border: 'border-l-red-500', icon: Zap },
-  'ALTA': { color: 'text-orange-700 dark:text-orange-400', bg: 'bg-orange-50 dark:bg-orange-950/30', border: 'border-l-orange-500', icon: AlertTriangle },
-  'MEDIA': { color: 'text-amber-700 dark:text-amber-400', bg: 'bg-amber-50 dark:bg-amber-950/30', border: 'border-l-amber-500', icon: Shield },
-  'BAJA': { color: 'text-teal-700 dark:text-teal-400', bg: 'bg-teal-50 dark:bg-teal-950/30', border: 'border-l-teal-500', icon: Activity },
-  'INFO': { color: 'text-gray-700 dark:text-gray-400', bg: 'bg-gray-50 dark:bg-gray-900/30', border: 'border-l-gray-400', icon: Bell },
-};
-
-const severityBadgeColors: Record<string, string> = {
-  'CRÍTICA': 'bg-red-500 text-white',
-  'ALTA': 'bg-orange-500 text-white',
-  'MEDIA': 'bg-amber-500 text-white',
-  'BAJA': 'bg-teal-500 text-white',
-  'INFO': 'bg-gray-400 text-white',
-};
+// Severity configs derived from unified registry
+const severityConfig: Record<string, { color: string; bg: string; border: string; icon: React.ElementType }> = Object.fromEntries(
+  (Object.entries(SEVERITY) as [SeverityLevel, typeof SEVERITY[SeverityLevel]][]).map(([k, v]) => [
+    k,
+    { color: `text-${v.border.replace('border-', '')} dark:text-${v.border.replace('border-', '')}`, bg: v.bg, border: v.border.replace('border-', 'border-l-'), icon: v.icon },
+  ])
+);
+const severityBadgeColors: Record<string, string> = Object.fromEntries(
+  (Object.entries(SEVERITY) as [SeverityLevel, typeof SEVERITY[SeverityLevel]][]).map(([k, v]) => [k, v.badge])
+);
 
 const alertTrendConfig = {
   count: { label: 'Alertas', color: '#EF4444' },
@@ -113,18 +110,16 @@ export function MonitoringView() {
     return hours;
   })();
 
-  const getThreatColor = (level: number) => {
-    if (level >= 80) return '#EF4444';
-    if (level >= 60) return '#F97316';
-    if (level >= 40) return '#F59E0B';
-    return '#10B981';
+  const getThreatColor = (level: number): string => {
+    const risk = scoreToRiskLevel(level);
+    const colorMap: Record<string, string> = { low: '#10B981', moderate: '#F59E0B', high: '#F97316', critical: '#EF4444' };
+    return colorMap[risk];
   };
 
-  const getThreatLabel = (level: number) => {
-    if (level >= 80) return 'CRÍTICO';
-    if (level >= 60) return 'ALTO';
-    if (level >= 40) return 'MEDIO';
-    return 'BAJO';
+  const getThreatLabel = (level: number): string => {
+    const risk = scoreToRiskLevel(level);
+    const labelMap: Record<string, string> = { low: 'BAJO', moderate: 'MEDIO', high: 'ALTO', critical: 'CRÍTICO' };
+    return labelMap[risk];
   };
 
   const activeAlerts = alerts.filter((a) => !a.acknowledged).length;

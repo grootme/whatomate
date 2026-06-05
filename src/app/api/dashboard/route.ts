@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { fetchService } from '@/lib/intelligence/service-client';
 import { db } from '@/lib/db';
 import { withAuth } from '@/lib/intelligence/auth';
+import { SEVERITY, scoreToRiskLevel, type SeverityLevel } from '@/lib/registries';
 
 async function _GET() {
   // ===== Try Go backend first =====
@@ -150,13 +151,9 @@ async function _GET() {
       where: { enabled: true },
     });
 
-    const severityPoints: Record<string, number> = {
-      'CRÍTICA': 4,
-      'ALTA': 3,
-      'MEDIA': 2,
-      'BAJA': 1,
-      'INFO': 0,
-    };
+    const severityPoints: Record<string, number> = Object.fromEntries(
+      (Object.entries(SEVERITY) as [SeverityLevel, typeof SEVERITY[SeverityLevel]][]).map(([k, v]) => [k, v.points])
+    );
 
     let threatScore = 0;
     for (const t of enabledThresholds) {
@@ -165,11 +162,10 @@ async function _GET() {
       }
     }
 
-    // Map total score to threat level: 0-2=low, 3-5=medium, 6-8=high, 9+=critical
-    const threatLevel: 'low' | 'medium' | 'high' | 'critical' =
-      threatScore >= 9 ? 'critical' :
-      threatScore >= 6 ? 'high' :
-      threatScore >= 3 ? 'medium' : 'low';
+    // Map total score to threat level using registry
+    const rawThreatLevel = scoreToRiskLevel(Math.min(100, threatScore * 10));
+    // Map registry's 'moderate' to legacy 'medium' for API compatibility
+    const threatLevel: 'low' | 'medium' | 'high' | 'critical' = rawThreatLevel === 'moderate' ? 'medium' : rawThreatLevel;
 
     // ===== Maritime / OSINT Data =====
     let maritime: {

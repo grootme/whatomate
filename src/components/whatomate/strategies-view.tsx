@@ -9,7 +9,9 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import { useWhatomateStore } from '@/lib/store';
-import { useIntelligenceData, patternTypeLabels, patternTypeSequences, conditionLabel, formatRelativeTime } from '@/hooks/use-intelligence-data';
+import { useIntelligenceData, patternTypeLabels, patternTypeSequences } from '@/hooks/use-intelligence-data';
+import { SEVERITY, type SeverityLevel, scoreToRiskLevel } from '@/lib/registries';
+import { conditionLabel, formatRelativeTime } from '@/lib/formatters';
 import {
   ChartContainer,
   ChartTooltip,
@@ -37,35 +39,21 @@ import {
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 
-const severityColors: Record<string, string> = {
-  'CRÍTICA': 'bg-red-500 text-white',
-  'ALTA': 'bg-orange-500 text-white',
-  'MEDIA': 'bg-amber-500 text-white',
-  'BAJA': 'bg-teal-500 text-white',
-  'INFO': 'bg-gray-400 text-white',
-};
-
-const severityBorders: Record<string, string> = {
-  'CRÍTICA': 'border-l-red-500',
-  'ALTA': 'border-l-orange-500',
-  'MEDIA': 'border-l-amber-500',
-  'BAJA': 'border-l-teal-500',
-  'INFO': 'border-l-gray-400',
-};
+// Severity configs consolidated from registries
+const severityColors: Record<string, string> = Object.fromEntries(
+  (Object.entries(SEVERITY) as [SeverityLevel, typeof SEVERITY[SeverityLevel]][]).map(([k, v]) => [k, v.badge])
+);
+const severityBorders: Record<string, string> = Object.fromEntries(
+  (Object.entries(SEVERITY) as [SeverityLevel, typeof SEVERITY[SeverityLevel]][]).map(([k, v]) => [k, v.border.replace('border-', 'border-l-')])
+);
 
 function RiskGauge({ score }: { score: number }) {
-  const getColor = (s: number) => {
-    if (s <= 30) return '#10B981';
-    if (s <= 50) return '#F59E0B';
-    if (s <= 70) return '#F97316';
-    return '#EF4444';
-  };
-  const getLabel = (s: number) => {
-    if (s <= 30) return 'Legítimo';
-    if (s <= 50) return 'Mercado Gris';
-    if (s <= 70) return 'Sospechoso';
-    return 'Fraude';
-  };
+  // Use scoreToRiskLevel from registries for color/label derivation
+  const riskLevel = scoreToRiskLevel(score);
+  const colorMap: Record<string, string> = { low: '#10B981', moderate: '#F59E0B', high: '#F97316', critical: '#EF4444' };
+  const labelMap: Record<string, string> = { low: 'Legítimo', moderate: 'Mercado Gris', high: 'Sospechoso', critical: 'Fraude' };
+  const getColor = (_s: number): string => colorMap[riskLevel];
+  const getLabel = (_s: number): string => labelMap[riskLevel];
 
   const data = [
     { name: 'value', value: score },

@@ -6,6 +6,8 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
+import { SEVERITY, type SeverityLevel, type AgentStatus, DNA_LAYERS, type DNALayerId, scoreToRiskLevel, RISK_LEVELS } from '@/lib/registries';
+import { AnimatedCounter, StatusDot, DataFlowArrow, HealthBar } from '@/components/whatomate/shared';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   DollarSign,
@@ -125,89 +127,24 @@ const missionIcons: Record<string, React.ElementType> = {
   AlertTriangle,
 };
 
-const layerColors: Record<number, string> = {
-  1: '#10B981',
-  2: '#F59E0B',
-  3: '#EF4444',
-  4: '#8B5CF6',
-};
-
-const layerLabels: Record<number, string> = {
-  1: 'Ingesta',
-  2: 'Análisis',
-  3: 'Monitoreo',
-  4: 'Reportes',
-};
+// DNA layer configs from unified registry
+const layerColorHex: Record<number, string> = { 1: '#10B981', 2: '#F59E0B', 3: '#EF4444', 4: '#8B5CF6' };
+const layerLabels: Record<number, string> = Object.fromEntries(
+  (Object.entries(DNA_LAYERS) as [DNALayerId, typeof DNA_LAYERS[DNALayerId]][]).map(([k, v]) => [k, v.nameEs])
+) as Record<number, string>;
 
 function severityColor(severity: string): string {
-  switch (severity) {
-    case 'CRÍTICA': return 'bg-red-500 text-white';
-    case 'ALTA': return 'bg-orange-500 text-white';
-    case 'MEDIA': return 'bg-amber-500 text-white';
-    case 'BAJA': return 'bg-blue-500 text-white';
-    default: return 'bg-gray-400 text-white';
-  }
+  const entry = SEVERITY[severity as SeverityLevel];
+  return entry?.badge ?? 'bg-gray-400 text-white';
 }
 
 function threatScoreColor(score: number): string {
-  if (score >= 75) return 'text-red-600';
-  if (score >= 50) return 'text-orange-600';
-  if (score >= 25) return 'text-amber-600';
-  return 'text-emerald-600';
+  const risk = scoreToRiskLevel(score);
+  const colorMap: Record<string, string> = { low: 'text-emerald-600', moderate: 'text-amber-600', high: 'text-orange-600', critical: 'text-red-600' };
+  return colorMap[risk];
 }
 
-// ===== ANIMATED COMPONENTS =====
-
-function AnimatedCounter({ value, duration = 800 }: { value: number; duration?: number }) {
-  const [display, setDisplay] = useState(0);
-  useEffect(() => {
-    const start = display;
-    const diff = value - start;
-    const steps = 20;
-    const stepTime = duration / steps;
-    let current = 0;
-    const timer = setInterval(() => {
-      current++;
-      setDisplay(Math.round(start + (diff * current) / steps));
-      if (current >= steps) clearInterval(timer);
-    }, stepTime);
-    return () => clearInterval(timer);
-  }, [value]);
-  return <>{display.toLocaleString()}</>;
-}
-
-function StatusDot({ status }: { status: string }) {
-  const colors: Record<string, string> = {
-    active: 'bg-emerald-500',
-    inactive: 'bg-gray-400',
-    warning: 'bg-amber-500',
-    error: 'bg-red-500',
-  };
-  return (
-    <motion.div
-      className={cn('w-2 h-2 rounded-full', colors[status] || 'bg-gray-400')}
-      animate={status === 'active' ? { scale: [1, 1.3, 1], opacity: [1, 0.7, 1] } : {}}
-      transition={{ repeat: Infinity, duration: 2, ease: 'easeInOut' }}
-    />
-  );
-}
-
-function DataFlowArrow({ color }: { color: string }) {
-  return (
-    <div className="flex flex-col items-center py-1">
-      {[0, 1].map((i) => (
-        <motion.div
-          key={i}
-          initial={{ opacity: 0, y: -4 }}
-          animate={{ opacity: 1, y: 4 }}
-          transition={{ repeat: Infinity, duration: 1.2, delay: i * 0.4, ease: 'easeInOut' }}
-        >
-          <ArrowDown className="w-3 h-3" style={{ color }} />
-        </motion.div>
-      ))}
-    </div>
-  );
-}
+// ===== ANIMATED COMPONENTS (imported from shared/) =====
 
 // ===== MISSION CARD =====
 
@@ -320,12 +257,12 @@ function MissionCard({ mission, isExpanded, onToggle }: {
                     <React.Fragment key={node.layer}>
                       <div
                         className="flex items-center gap-3 p-2.5 rounded-lg"
-                        style={{ backgroundColor: layerColors[node.layer] + '08' }}
+                        style={{ backgroundColor: layerColorHex[node.layer] + '08' }}
                       >
                         {/* Layer Badge */}
                         <div
                           className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold shrink-0"
-                          style={{ backgroundColor: layerColors[node.layer] }}
+                          style={{ backgroundColor: layerColorHex[node.layer] }}
                         >
                           L{node.layer}
                         </div>
@@ -359,11 +296,11 @@ function MissionCard({ mission, isExpanded, onToggle }: {
                         </div>
 
                         {/* Status */}
-                        <StatusDot status={node.status} />
+                        <StatusDot status={(node.status === 'degraded' ? 'warning' : node.status) as AgentStatus} />
                       </div>
                       {idx < mission.dataFlow.length - 1 && (
                         <div className="flex justify-center py-0.5">
-                          <DataFlowArrow color={layerColors[node.layer]} />
+                          <DataFlowArrow direction="down" />
                         </div>
                       )}
                     </React.Fragment>
@@ -393,12 +330,12 @@ function MissionCard({ mission, isExpanded, onToggle }: {
                       )}
                     >
                       <div className="flex items-center gap-1.5 mb-1">
-                        <StatusDot status={agent.status} />
+                        <StatusDot status={agent.status as AgentStatus} />
                         <span className="font-semibold text-[11px] truncate">{agent.name}</span>
                         <Badge
                           variant="outline"
                           className="text-[8px] py-0 px-1 ml-auto shrink-0"
-                          style={{ borderColor: layerColors[agent.layer] + '60', color: layerColors[agent.layer] }}
+                          style={{ borderColor: layerColorHex[agent.layer] + '60', color: layerColorHex[agent.layer] }}
                         >
                           L{agent.layer}
                         </Badge>

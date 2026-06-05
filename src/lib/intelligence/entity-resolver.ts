@@ -31,6 +31,8 @@
 import { db } from '@/lib/db';
 import { persistEvent } from './event-persist';
 import type { EntityType, EventStream } from './types';
+import { jaccardSimilarity } from '@/lib/similarity';
+import { parseJsonField } from '@/lib/db-mappers';
 
 // ===== TYPES =====
 
@@ -59,6 +61,7 @@ export interface ResolveEntitiesResult {
 }
 
 // ===== SIMILARITY THRESHOLDS =====
+// jaccardSimilarity is now imported from @/lib/similarity
 
 /** Minimum Jaccard similarity to consider two names a potential match */
 const JACCARD_THRESHOLD = 0.65;
@@ -71,21 +74,6 @@ const SHARED_PLATFORM_ID_BOOST = 0.20;
 
 /** Combined threshold for considering a merge (Jaccard + boosts) */
 const MERGE_THRESHOLD = 0.65;
-
-// ===== STRING SIMILARITY =====
-
-/**
- * Jaccard similarity coefficient based on character-level set intersection/union.
- * Returns a value between 0 (completely dissimilar) and 1 (identical).
- */
-function jaccardSimilarity(a: string, b: string): number {
-  const setA = new Set(a.toLowerCase().split(''));
-  const setB = new Set(b.toLowerCase().split(''));
-  const intersection = new Set([...setA].filter(x => setB.has(x)));
-  const union = new Set([...setA, ...setB]);
-  if (union.size === 0) return 0;
-  return intersection.size / union.size;
-}
 
 /**
  * Normalize a name for comparison: lowercase, trim, collapse whitespace.
@@ -188,17 +176,7 @@ function computeSimilarity(a: ResolutionCandidate, b: ResolutionCandidate): numb
 
 // ===== HELPERS =====
 
-/**
- * Parse a JSON field from the database, returning a default on failure.
- */
-function parseJsonField<T>(raw: string | null, defaultValue: T): T {
-  if (!raw) return defaultValue;
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return defaultValue;
-  }
-}
+// parseJsonField is now imported from @/lib/db-mappers
 
 /**
  * Merge two platformIds records, deduplicating the ID arrays.

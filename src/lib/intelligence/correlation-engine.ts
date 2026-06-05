@@ -13,20 +13,11 @@
 import { db } from '@/lib/db';
 import { persistEvent } from './event-persist';
 import type { EventStream } from './types';
+import { jaccardSimilarity } from '@/lib/similarity';
+import { parseJsonArray, parseJsonField } from '@/lib/db-mappers';
 
 // ===== STRING SIMILARITY =====
-
-/**
- * Jaccard similarity coefficient based on character-level set intersection/union.
- * Returns a value between 0 (completely dissimilar) and 1 (identical).
- */
-function jaccardSimilarity(a: string, b: string): number {
-  const setA = new Set(a.toLowerCase().split(''));
-  const setB = new Set(b.toLowerCase().split(''));
-  const intersection = new Set([...setA].filter(x => setB.has(x)));
-  const union = new Set([...setA, ...setB]);
-  return intersection.size / union.size;
-}
+// jaccardSimilarity is now imported from @/lib/similarity
 
 // ===== THRESHOLDS =====
 
@@ -63,26 +54,11 @@ export interface FullCorrelationResult extends CorrelateEntitiesResult, Correlat
 }
 
 // ===== HELPER: Parse platformIds from JSON =====
-
-function parsePlatformIds(raw: string | null): Record<string, string[]> {
-  if (!raw) return {};
-  try {
-    return JSON.parse(raw) as Record<string, string[]>;
-  } catch {
-    return {};
-  }
-}
+// Uses parseJsonField from @/lib/db-mappers for Record<string, string[]> shape
+const parsePlatformIds = (raw: string | null): Record<string, string[]> => parseJsonField<Record<string, string[]>>(raw, {});
 
 // ===== HELPER: Parse JSON array field =====
-
-function parseJsonArray(raw: string | null): string[] {
-  if (!raw) return [];
-  try {
-    return JSON.parse(raw) as string[];
-  } catch {
-    return [];
-  }
-}
+// parseJsonArray is now imported from @/lib/db-mappers
 
 // ===== CORRELATE ENTITIES =====
 

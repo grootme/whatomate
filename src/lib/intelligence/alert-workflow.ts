@@ -24,8 +24,11 @@ import { db } from '@/lib/db';
 import { persistEvent } from './event-persist';
 import { notifyAlert } from './notification-channel';
 import type { AlertSeverity, Alert, EventStream } from './types';
+import { SEVERITY_ORDER, severityRank } from './types';
+import { jaccardWordSimilarity } from '@/lib/similarity';
 
 // ===== CONSTANTS =====
+// SEVERITY_ORDER and severityRank are now imported from types (which delegates to registries)
 
 /** Time before auto-escalating CRÍTICA/ALTA alerts (30 minutes) */
 const AUTO_ESCALATE_MS = 30 * 60 * 1000;
@@ -45,13 +48,6 @@ const TITLE_SIMILARITY_THRESHOLD = 0.7;
 /** INNOVATION 7: If 3+ alerts of the same strategy type occur within 1 hour, auto-escalate to next severity */
 const ESCALATION_BURST_THRESHOLD = 3;
 const ESCALATION_BURST_WINDOW_MS = 60 * 60 * 1000;
-
-/** Severity hierarchy for ordering */
-const SEVERITY_ORDER: AlertSeverity[] = ['INFO', 'BAJA', 'MEDIA', 'ALTA', 'CRÍTICA'];
-
-function severityRank(severity: AlertSeverity): number {
-  return SEVERITY_ORDER.indexOf(severity);
-}
 
 // ===== RESULT TYPES =====
 
@@ -255,19 +251,7 @@ async function autoDismiss(): Promise<Array<{ alertId: string; title: string; se
 
 // ===== 2b. SEMANTIC SIMILARITY (INNOVATION 2) =====
 
-/**
- * Jaccard word-level similarity between two strings.
- * Splits into word tokens, computes |intersection| / |union| of word sets.
- * This is better than character-level Jaccard for comparing alert titles.
- */
-function jaccardWordSimilarity(a: string, b: string): number {
-  const wordsA = new Set(a.toLowerCase().split(/\s+/).filter(w => w.length > 2));
-  const wordsB = new Set(b.toLowerCase().split(/\s+/).filter(w => w.length > 2));
-  if (wordsA.size === 0 && wordsB.size === 0) return 1.0;
-  const intersection = new Set([...wordsA].filter(x => wordsB.has(x)));
-  const union = new Set([...wordsA, ...wordsB]);
-  return intersection.size / union.size;
-}
+// jaccardWordSimilarity is now imported from @/lib/similarity
 
 /**
  * Find semantically similar alerts from the last 24 hours.

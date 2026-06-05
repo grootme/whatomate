@@ -2,45 +2,16 @@
 
 import React from 'react';
 import { cn } from '@/lib/utils';
+import { VIEW_REGISTRY, type ViewId } from '@/lib/registries';
 import { navItems } from '@/lib/nav-config';
 import {
-  LayoutDashboard,
   MessageSquare,
-  Users,
-  FileText,
-  Megaphone,
-  Bot,
-  BarChart3,
-  Settings,
-  Brain,
-  Microscope,
-  Zap,
-  Radar,
-  GitBranch,
-  Activity,
-  FileOutput,
-  Crosshair,
   X,
 } from 'lucide-react';
 
-const iconMap: Record<string, React.ElementType> = {
-  LayoutDashboard,
-  MessageSquare,
-  Users,
-  FileText,
-  Megaphone,
-  Bot,
-  BarChart3,
-  Settings,
-  Brain,
-  Microscope,
-  Zap,
-  Radar,
-  GitBranch,
-  Activity,
-  FileOutput,
-  Crosshair,
-};
+const iconMap: Record<string, React.ElementType> = Object.fromEntries(
+  (Object.entries(VIEW_REGISTRY) as [ViewId, typeof VIEW_REGISTRY[ViewId]][]).map(([id, v]) => [id, v.icon])
+);
 
 interface SidebarProps {
   activeView: string;
@@ -93,7 +64,7 @@ export function Sidebar({ activeView, onViewChange, isOpen, onClose }: SidebarPr
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto custom-scrollbar">
           {/* Main Nav */}
           {mainItems.map((item) => {
-            const Icon = iconMap[item.icon] || LayoutDashboard;
+            const Icon = iconMap[item.icon];
             const isActive = activeView === item.id;
 
             return (
@@ -131,7 +102,7 @@ export function Sidebar({ activeView, onViewChange, isOpen, onClose }: SidebarPr
           </div>
 
           {osintItems.map((item) => {
-            const Icon = iconMap[item.icon] || LayoutDashboard;
+            const Icon = iconMap[item.icon];
             const isActive = activeView === item.id;
 
             return (
@@ -167,7 +138,7 @@ export function Sidebar({ activeView, onViewChange, isOpen, onClose }: SidebarPr
           </div>
 
           {settingsItems.map((item) => {
-            const Icon = iconMap[item.icon] || LayoutDashboard;
+            const Icon = iconMap[item.icon];
             const isActive = activeView === item.id;
 
             return (

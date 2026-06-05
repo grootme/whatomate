@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
+import { VIEW_REGISTRY, type ViewId } from '@/lib/registries';
 import {
   Menu,
   Search,
@@ -29,24 +30,9 @@ interface HeaderProps {
   onLogout: () => void;
 }
 
-const viewTitles: Record<string, string> = {
-  dashboard: 'Dashboard',
-  chat: 'Chat',
-  contacts: 'Contacts',
-  templates: 'Message Templates',
-  campaigns: 'Campaigns',
-  chatbot: 'Chatbot',
-  analytics: 'Analytics',
-  cognitive: 'Cognitive Capital',
-  research: 'DeerFlow Research',
-  hermes: 'Hermes Gateway',
-  multiagent: 'Multi-Agente OSINT',
-  missions: 'Misiones Especializadas',
-  strategies: 'Estrategias de Decisión',
-  monitoring: 'Monitoreo en Tiempo Real',
-  reports: 'Centro de Reportes',
-  settings: 'Settings',
-};
+const viewTitles: Record<string, string> = Object.fromEntries(
+  (Object.entries(VIEW_REGISTRY) as [ViewId, typeof VIEW_REGISTRY[ViewId]][]).map(([id, v]) => [id, v.label])
+);
 
 export function Header({ activeView, onMenuToggle, onLogout }: HeaderProps) {
   return (

@@ -14,6 +14,7 @@ import { db } from '@/lib/db';
 import { safeEventAppend } from './safe-event';
 import { persistEvent } from './event-persist';
 import type { EventStream } from './types';
+import { parseJsonArray as parseJsonArrayFromMapper } from '@/lib/db-mappers';
 
 // ===== SUSPICIOUS KEYWORDS (multi-language: Spanish, English, Portuguese, French) =====
 export const SUSPICIOUS_KEYWORDS = [
@@ -446,12 +447,8 @@ export async function updateThresholdValues(suspiciousCount?: number): Promise<v
 
 // ===== PROACTIVE PATTERN DETECTION =====
 
-/** Helper: parse a JSON array field from a PatternDetection record */
-function parseJsonArrayField(raw: string | null): string[] {
-  if (!raw) return [];
-  try { return JSON.parse(raw) as string[]; }
-  catch { return []; }
-}
+/** Helper: parse a JSON array field from a PatternDetection record — delegates to db-mappers */
+const parseJsonArrayField = parseJsonArrayFromMapper;
 
 /** Helper: upsert a PatternDetection — create if not found, update if exists */
 async function upsertPattern(params: {

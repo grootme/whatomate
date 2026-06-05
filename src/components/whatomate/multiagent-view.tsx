@@ -6,6 +6,9 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
+import { SEVERITY, type SeverityLevel, type AgentStatus, DNA_LAYERS, type DNALayerId, scoreToRiskLevel } from '@/lib/registries';
+import { AnimatedCounter, StatusDot, DataFlowArrow, HealthBar } from '@/components/whatomate/shared';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useWhatomateStore } from '@/lib/store';
 import { useIntelligenceData } from '@/hooks/use-intelligence-data';
 import {
@@ -29,83 +32,16 @@ import {
   MessageSquare,
   Zap,
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
-
+// Layer icons + DNA_LAYERS registry companion data
 const layerIcons: Record<string, React.ElementType> = {
   Download,
   Brain,
   Shield,
   FileOutput,
 };
+const layerColorHex: Record<number, string> = { 1: '#3B82F6', 2: '#A855F7', 3: '#F59E0B', 4: '#10B981' };
 
-function AnimatedCounter({ value, duration = 1000 }: { value: number; duration?: number }) {
-  const [display, setDisplay] = useState(0);
-  useEffect(() => {
-    const start = display;
-    const diff = value - start;
-    const steps = 30;
-    const stepTime = duration / steps;
-    let current = 0;
-    const timer = setInterval(() => {
-      current++;
-      setDisplay(Math.round(start + (diff * current) / steps));
-      if (current >= steps) clearInterval(timer);
-    }, stepTime);
-    return () => clearInterval(timer);
-  }, [value]);
-  return <>{display.toLocaleString()}</>;
-}
-
-function StatusIndicator({ status }: { status: string }) {
-  const colors: Record<string, string> = {
-    active: 'bg-emerald-500',
-    inactive: 'bg-gray-400',
-    warning: 'bg-amber-500',
-    error: 'bg-red-500',
-  };
-  return (
-    <motion.div
-      className={cn('w-2.5 h-2.5 rounded-full', colors[status] || 'bg-gray-400')}
-      animate={status === 'active' ? { scale: [1, 1.3, 1], opacity: [1, 0.7, 1] } : {}}
-      transition={{ repeat: Infinity, duration: 2, ease: 'easeInOut' }}
-    />
-  );
-}
-
-function HealthBar({ health, status }: { health: number; status: string }) {
-  const barColor =
-    status === 'inactive' ? 'bg-gray-300' :
-    health >= 90 ? 'bg-emerald-500' :
-    health >= 70 ? 'bg-amber-500' :
-    'bg-red-500';
-  return (
-    <div className="w-full h-1.5 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
-      <motion.div
-        className={cn('h-full rounded-full', barColor)}
-        initial={{ width: 0 }}
-        animate={{ width: `${health}%` }}
-        transition={{ duration: 1, ease: 'easeOut' }}
-      />
-    </div>
-  );
-}
-
-function DataFlowArrow() {
-  return (
-    <div className="flex flex-col items-center py-1">
-      {[0, 1, 2].map((i) => (
-        <motion.div
-          key={i}
-          initial={{ opacity: 0, y: -5 }}
-          animate={{ opacity: 1, y: 5 }}
-          transition={{ repeat: Infinity, duration: 1.5, delay: i * 0.5, ease: 'easeInOut' }}
-        >
-          <ArrowDown className="w-4 h-4 text-emerald-400" />
-        </motion.div>
-      ))}
-    </div>
-  );
-}
+// ===== SHARED COMPONENTS (imported from shared/) =====
 
 export function MultiagentView() {
   const { agentLayers, eventBus, ecosystem, threatLevel } = useWhatomateStore();
@@ -118,7 +54,7 @@ export function MultiagentView() {
     whatsappGroups: ecosystem.whatsappGroups,
     osintSources: ecosystem.osintSources,
     intelligenceTools: agentLayers.reduce((sum, l) => sum + l.agents.length, 0),
-    threatLevel: threatLevel >= 80 ? 'CRÍTICO' : threatLevel >= 60 ? 'ALTO' : threatLevel >= 40 ? 'MEDIO' : 'BAJO',
+    threatLevel: (() => { const r = scoreToRiskLevel(threatLevel); return r === 'critical' ? 'CRÍTICO' : r === 'high' ? 'ALTO' : r === 'moderate' ? 'MEDIO' : 'BAJO'; })(),
   };
 
   const totalAgents = agentLayers.reduce((sum, l) => sum + l.agents.length, 0);
@@ -265,7 +201,7 @@ export function MultiagentView() {
                         )}>
                           <div className="flex items-start justify-between mb-2">
                             <div className="flex items-center gap-2">
-                              <StatusIndicator status={agent.status} />
+                              <StatusDot status={agent.status as AgentStatus} />
                               <span className="text-sm font-semibold">{agent.name}</span>
                             </div>
                             {agent.status === 'active' ? (
@@ -277,7 +213,7 @@ export function MultiagentView() {
                             )}
                           </div>
                           <p className="text-xs text-muted-foreground mb-3 line-clamp-2">{agent.description}</p>
-                          <HealthBar health={agent.health} status={agent.status} />
+                          <HealthBar value={agent.health} />
                           <div className="flex items-center justify-between mt-2 text-xs text-muted-foreground">
                             <span>Salud: {agent.health}%</span>
                             <span>Uptime: {agent.uptime}</span>
@@ -299,7 +235,7 @@ export function MultiagentView() {
               </Card>
               {layerIdx < agentLayers.length - 1 && (
                 <div className="flex justify-center py-2">
-                  <DataFlowArrow />
+                  <DataFlowArrow direction="down" />
                 </div>
               )}
             </React.Fragment>
@@ -391,13 +327,12 @@ export function MultiagentView() {
                     <span className="text-xs text-muted-foreground text-center">{layer.agents.length} agentes</span>
                     <div className="flex gap-1">
                       {layer.agents.map((agent) => (
-                        <StatusIndicator key={agent.id} status={agent.status} />
+                        <StatusDot key={agent.id} status={agent.status as AgentStatus} />
                       ))}
                     </div>
                     <div className="w-full mt-1">
                       <HealthBar
-                        health={Math.round(layer.agents.reduce((s, a) => s + a.health, 0) / layer.agents.length)}
-                        status="active"
+                        value={Math.round(layer.agents.reduce((s, a) => s + a.health, 0) / layer.agents.length)}
                       />
                     </div>
                   </motion.div>

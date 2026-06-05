@@ -2,6 +2,8 @@
 
 import { useEffect, useCallback, useRef } from 'react';
 import { useWhatomateStore } from '@/lib/store';
+import { PATTERN_TYPES, type PatternType as RegistryPatternType } from '@/lib/registries';
+import { formatTimestamp as formatTimestampShared, formatRelativeTime as formatRelativeTimeShared, formatDateString as formatDateStringShared, conditionLabel as conditionLabelShared } from '@/lib/formatters';
 import type {
   AgentLayer,
   Alert,
@@ -471,57 +473,27 @@ export const reportTemplates: ReportTemplate[] = [
 
 /**
  * Mapping from PatternType enum to human-readable Spanish names
+ * Derived from PATTERN_TYPES registry
  */
-export const patternTypeLabels: Record<string, string> = {
-  fraud_multichannel: 'Fraude multi-canal',
-  money_laundering: 'Lavado de divisas',
-  disinformation: 'Desinformación coordinada',
-  crypto_manipulation: 'Manipulación cripto',
-  irregular_migration: 'Migración irregular',
-};
+export const patternTypeLabels: Record<string, string> = Object.fromEntries(
+  (Object.entries(PATTERN_TYPES) as [RegistryPatternType, typeof PATTERN_TYPES[RegistryPatternType]][]).map(([k, v]) => [k, v.labelEs])
+);
 
 /**
  * Default sequence steps for each pattern type
+ * Derived from PATTERN_TYPES registry
  */
-export const patternTypeSequences: Record<string, string[]> = {
-  fraud_multichannel: [
-    'Detección WhatsApp',
-    'Correlación Telegram',
-    'Verificación OSINT',
-    'Confirmación multi-fuente',
-  ],
-  money_laundering: [
-    'Transacción inusual',
-    'Patrón fragmentación',
-    'Conexión cripto',
-    'Flujo offshore',
-  ],
-  disinformation: [
-    'Narrativa emergente',
-    'Coordinación temporal',
-    'Amplificación bots',
-    'Verificación factual',
-  ],
-  crypto_manipulation: [
-    'Señal compra coordinada',
-    'Volumen anómalo',
-    'Venta masiva',
-    'Caída precio',
-  ],
-  irregular_migration: [
-    'Agrupamiento geográfico',
-    'Patrones comunicación',
-    'Rutas identificadas',
-    'Cruce fronterizo',
-  ],
-};
+export const patternTypeSequences: Record<string, string[]> = Object.fromEntries(
+  (Object.entries(PATTERN_TYPES) as [RegistryPatternType, typeof PATTERN_TYPES[RegistryPatternType]][]).map(([k, v]) => [k, v.sequence])
+);
 
 /**
  * Format a date/timestamp for display in the monitoring view.
- * Accepts ISO strings, epoch numbers, or Date objects.
+ * Delegates to shared formatters with backward-compatible signatures.
  */
 export function formatTimestamp(ts: string | number | Date | undefined): string {
   if (!ts) return '';
+  // For time-only display, use custom logic
   try {
     const d = typeof ts === 'string' || typeof ts === 'number' ? new Date(ts) : ts;
     if (isNaN(d.getTime())) return String(ts);
@@ -533,50 +505,28 @@ export function formatTimestamp(ts: string | number | Date | undefined): string 
 
 /**
  * Format a date as a relative time string (e.g. "Hace 2h")
+ * Delegates to shared formatters.
  */
 export function formatRelativeTime(ts: string | number | Date | undefined): string {
   if (!ts) return '';
-  try {
-    const d = typeof ts === 'string' || typeof ts === 'number' ? new Date(ts) : ts;
-    if (isNaN(d.getTime())) return String(ts);
-    const now = new Date();
-    const diffMs = now.getTime() - d.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    if (diffMins < 1) return 'Ahora';
-    if (diffMins < 60) return `Hace ${diffMins}m`;
-    const diffHours = Math.floor(diffMins / 60);
-    if (diffHours < 24) return `Hace ${diffHours}h`;
-    const diffDays = Math.floor(diffHours / 24);
-    return `Hace ${diffDays}d`;
-  } catch {
-    return String(ts);
-  }
+  const iso = typeof ts === 'string' ? ts : typeof ts === 'number' ? new Date(ts).toISOString() : ts.toISOString();
+  return formatRelativeTimeShared(iso);
 }
 
 /**
- * Format a date as a short date string (e.g. "2026-05-25")
+ * Format a date as a short date string
+ * Delegates to shared formatters.
  */
 export function formatDateString(ts: string | number | Date | undefined): string {
   if (!ts) return '';
-  try {
-    const d = typeof ts === 'string' || typeof ts === 'number' ? new Date(ts) : ts;
-    if (isNaN(d.getTime())) return String(ts);
-    return d.toISOString().split('T')[0];
-  } catch {
-    return String(ts);
-  }
+  const iso = typeof ts === 'string' ? ts : typeof ts === 'number' ? new Date(ts).toISOString() : ts.toISOString();
+  return formatDateStringShared(iso);
 }
 
 /**
  * Map condition operator to display string
+ * Delegates to shared formatters.
  */
 export function conditionLabel(condition: string): string {
-  const map: Record<string, string> = {
-    gte: '≥',
-    lte: '≤',
-    gt: '>',
-    lt: '<',
-    eq: '=',
-  };
-  return map[condition] || condition;
+  return conditionLabelShared(condition);
 }

@@ -1,5 +1,17 @@
 // ===== CORE TYPES =====
 
+// Import registry utilities for severity ordering and risk scoring
+import { SEVERITY_ORDER as REG_SEVERITY_ORDER, severityRank as regSeverityRank, scoreToRiskLevel as regScoreToRiskLevel } from '@/lib/registries';
+
+// Re-export for backward compatibility — delegates to unified registry
+export const SEVERITY_ORDER = REG_SEVERITY_ORDER;
+export const severityRank = regSeverityRank;
+// scoreToRiskLevel uses 'moderate' in registry but domain uses 'medium'
+export function scoreToRiskLevel(score: number): 'low' | 'medium' | 'high' | 'critical' {
+  const r = regScoreToRiskLevel(score);
+  return r === 'moderate' ? 'medium' : r;
+}
+
 // Event Sourcing
 export interface IntelligenceEvent {
   id: string;

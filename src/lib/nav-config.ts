@@ -1,23 +1,35 @@
 /**
  * Navigation configuration for the Whatomate platform.
- * This is UI configuration, not mock data — navigation items are static definitions.
+ * Derived from VIEW_REGISTRY in @/lib/registries — single source of truth.
  */
 
-export const navItems = [
-  { id: "dashboard", label: "Dashboard", icon: "LayoutDashboard" as const },
-  { id: "chat", label: "Chat", icon: "MessageSquare" as const },
-  { id: "contacts", label: "Contacts", icon: "Users" as const },
-  { id: "templates", label: "Templates", icon: "FileText" as const },
-  { id: "campaigns", label: "Campaigns", icon: "Megaphone" as const },
-  { id: "chatbot", label: "Chatbot", icon: "Bot" as const },
-  { id: "analytics", label: "Analytics", icon: "BarChart3" as const },
-  { id: "cognitive", label: "🧠 Cognitive", icon: "Brain" as const },
-  { id: "research", label: "🔬 Research", icon: "Microscope" as const },
-  { id: "hermes", label: "⚡ Hermes", icon: "Zap" as const },
-  { id: "multiagent", label: "🛡️ Multi-Agente", icon: "Radar" as const },
-  { id: "missions", label: "🎯 Misiones", icon: "Crosshair" as const },
-  { id: "strategies", label: "⚙️ Estrategias", icon: "GitBranch" as const },
-  { id: "monitoring", label: "📡 Monitoreo", icon: "Activity" as const },
-  { id: "reports", label: "📊 Reportes", icon: "FileOutput" as const },
-  { id: "settings", label: "Settings", icon: "Settings" as const },
-];
+import { VIEW_REGISTRY, type ViewId } from '@/lib/registries';
+
+// Icons that the sidebar maps from VIEW_REGISTRY icon references
+// (kept here because sidebar uses string-based icon lookup from navItems)
+const ICON_NAMES: Record<string, string> = {
+  dashboard: 'LayoutDashboard',
+  chat: 'MessageSquare',
+  contacts: 'Users',
+  templates: 'FileText',
+  campaigns: 'Megaphone',
+  chatbot: 'Bot',
+  analytics: 'BarChart3',
+  settings: 'Settings',
+  cognitive: 'Brain',
+  research: 'Microscope',
+  hermes: 'Zap',
+  multiagent: 'Radar',
+  missions: 'Crosshair',
+  strategies: 'GitBranch',
+  monitoring: 'Activity',
+  reports: 'FileOutput',
+};
+
+export const navItems = (Object.entries(VIEW_REGISTRY) as [ViewId, typeof VIEW_REGISTRY[ViewId]][]).map(
+  ([id, config]) => ({
+    id,
+    label: config.label,
+    icon: (ICON_NAMES[id] || 'LayoutDashboard') as const,
+  })
+);
