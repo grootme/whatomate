@@ -1,0 +1,16 @@
+{
+  "name": "cognitive-capital-api",
+  "version": "1.0.0",
+  "description": "Cognitive Capital API Server for the whatomate ecosystem - Redis-powered knowledge management",
+  "main": "index.ts",
+  "scripts": {
+    "dev": "npx tsx index.ts",
+    "start": "npx tsx index.ts"
+  },
+  "dependencies": {
+    "ioredis": "^5.3.2"
+  },
+  "devDependencies": {
+    "tsx": "^4.7.0"
+  }
+}

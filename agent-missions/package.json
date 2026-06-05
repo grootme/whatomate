@@ -1,0 +1,17 @@
+{
+  "name": "whatomate-agent-missions",
+  "version": "1.0.0",
+  "description": "Whatomate Intelligence Platform - Agent Mission Groups System",
+  "main": "index.ts",
+  "scripts": {
+    "dev": "bun --hot index.ts",
+    "start": "npx tsx index.ts"
+  },
+  "dependencies": {
+    "ioredis": "^5.4.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "@types/node": "^22.0.0"
+  }
+}
